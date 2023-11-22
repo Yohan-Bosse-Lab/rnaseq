@@ -97,9 +97,6 @@ datatable(too_low,caption = htmltools::tags$caption(htmltools::strong("ALIGNMENT
 ```
 
 
-
-***  
-
 # Summary plots 
 ```{r plots, fig.height = 8,message=FALSE}
 align_sequences = merge(align,sequences,by = 'bio_sample')
@@ -180,16 +177,69 @@ dev.off()
 
 ```
 
-
-
 #dominique veut les stats pour une coupe d'invividus:
 ```{r correls}
 resume = read_xlsx('2023-10-03_Resume_nombre_reads_RNAseq_500_ADK.xlsx',sheet = 'List_<70M_reads')
-
 resume2 = merge(resume,align_sequences, by.x = 'Nom de librairie', by.y = 'bio_sample',all.x =T)
-
 write.table(resume2, 'rnaseq/resume2.csv')
+```
 
+
+#What is the effect of only using a fraction of the sequences (200k, 2M, 20M and all(96M) sequences)?
+```{r effect of varried library size}
+k200 = read.csv('lordmini_alignments/library_size/expression_df_200k.csv')
+M2 = read.csv('lordmini_alignments/library_size/expression_df_2M.csv')
+M20 = read.csv('lordmini_alignments/library_size/expression_df_20M.csv')
+M96 = read.csv('lordmini_alignments/library_size/expression_df_96M.csv')
+
+cor(k200[5:62707,3],M96[5:62707,3]);cor(k200[M96[,3]<1000,3],M96[M96[,3]<1000,3])
+cor(M2[5:62707,3],M96[5:62707,3]);cor(M2[M96[,3]<1000,3],M96[M96[,3]<1000,3])
+cor(M20[5:62707,3],M96[5:62707,3]);cor(M20[M96[,3]<1000,3],M96[M96[,3]<1000,3])
+```
+
+
+
+#kallisto sur trimmed VS non-trimmed.
+```{r correls}
+txi = readRDS('lord_kallisto/part1/txi.rds')
+txi_notrim = readRDS('lord_kallisto/part1_notrim/txi.rds')
+samples = colnames(txi_notrim$counts)
+samples = sapply(strsplit(samples, "i5."), "[", 2)
+
+counts_df = data.frame(counts_notrim = c(txi_notrim$counts[,1:4]),
+                       counts = c(txi$counts[,1:4]),
+                       gene = rep(rownames(txi$counts),4),
+                       samples = unlist(lapply(samples,rep,nrow(txi_notrim$counts))))
+
+counts_df$log_notrim = log(counts_df$counts_notrim,10)
+counts_df$log = log(counts_df$counts,10)
+
+counts_df_small = counts_df[counts_df$counts_notrim<20,]
+
+#
+plot_effect_of_trimming = ggplot(counts_df, aes(x=counts, y=counts_notrim,color = samples)) +
+  geom_point() +
+  ggtitle("Kallisto counts (trimmed vs raw)") + theme(legend.position = 'none')
+
+#
+plot_effect_of_logtrimming = ggplot(counts_df, aes(x=log, y=log_notrim,color = samples)) +
+  geom_point() +
+  ggtitle("log(counts) (trimmed vs raw)")
+
+#
+plot_small = ggplot(counts_df_small, aes(x = counts, y = counts_notrim, col = samples)) +
+  geom_point(shape = 1,alpha = 1/2) +
+  ggtitle("Counts(trimmed vs raw): small values") + theme(legend.position = 'none')
+
+#
+plot_small_log = ggplot(counts_df_small, aes(x = log, y = log_notrim, col = samples)) +
+  geom_point(shape = 1,alpha = 1/2) +
+  ggtitle("log(counts) (trimmed vs raw): small values") + theme(legend.position = 'none')
+
+#
+png('lordQC/trimmed_vs_non_trimmed_kallisto.png',width = 800,height = 500) 
+(plot_effect_of_trimming | plot_effect_of_logtrimming) / (plot_small | plot_small_log)+ plot_annotation(tag_levels = 'A')
+dev.off()
 ```
 
 

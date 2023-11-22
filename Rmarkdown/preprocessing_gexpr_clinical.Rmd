@@ -1,0 +1,94 @@
+---
+title: "Preparing Gene expression and clinical data"
+author: "Sébastien Renaut (sebastien.renaut@criucpq.ulaval.ca)"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    number_sections: F
+params:
+  datapath: 'C:/Users/renseb01/Documents/rnaseq/lord_kallisto'
+  outputpath: '../..' 
+  hlca: 'C:/Users/renseb01/Documents/scRNA/scRNA/data/HLCA'
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_knit$set(root.dir = params$datapath)
+knitr::opts_chunk$set(echo = F)
+library(ggplot2)
+library(readxl)
+library(patchwork)
+```
+
+## upload Gene expression Kallisto files
+```{r data upload}
+txi1 = readRDS(file.path(params$datapath,'part1/txi.rds'))
+txi2 = readRDS(file.path(params$datapath,'part2/txi.rds'))
+txi3 = readRDS(file.path(params$datapath,'part3/txi.rds'))
+txi4 = readRDS(file.path(params$datapath,'part4/txi.rds'))
+
+txi = txi1
+txi$abundance = cbind(txi1$abundance,txi2$abundance,txi3$abundance,txi4$abundance)
+txi$counts  = cbind(txi1$counts,txi2$counts,txi3$counts,txi4$counts)
+txi$length = cbind(txi1$length,txi2$length,txi3$length,txi4$length)
+  
+saveRDS(txi,file.path(params$datapath,'txi.rds'))
+
+clinical_temp = data.frame(sample = colnames(txi$length), 
+                      'Record ID' = sapply(strsplit(colnames(txi$length), "_"), "[",5),
+                      tissue = sapply(strsplit(colnames(txi$length), "_"), "[",6),
+                      batch = c(rep('batch1',ncol(txi1$abundance)),rep('batch2',ncol(txi2$abundance)),rep('batch3',ncol(txi3$abundance)),rep('batch4',ncol(txi4$abundance))),
+                      check.names = F)
+
+#batch info
+batch = clinical_temp[,c(2,4)]
+batch = batch[!duplicated(batch),]
+```
+
+## clinical data
+```{r clinical data}
+files = list.files(file.path(params$datapath,'../data/RNAseq_512_données'),full.names = T)
+
+clinical = list()
+temp_names = c()
+
+#load all clinical data
+for(i in seq_along(files)){
+  temp = read_xlsx(files[i])
+  temp_name = tail(strsplit(files[i],'/')[[1]],1)
+  temp_names[i] = gsub('_2023-09-20.xlsx','',temp_name)
+  
+  clinical[[i]] = temp
+
+  colnames(clinical[[i]])[-1] = paste0(temp_names[i],'_',colnames(clinical[[i]])[-1])
+  }
+names(clinical) = temp_names
+
+#check the data
+for(i in seq_along(files)){
+  print(paste0('Nrows of ',strsplit(files[i],'/')[[1]][3], ' is: ',nrow(clinical[[i]])))
+  print(paste0('Ncols of ',strsplit(files[i],'/')[[1]][3], ' is: ',ncol(clinical[[i]])))
+  print(colnames(clinical[[i]])[1])
+  print(all.equal(clinical[[1]][,1],clinical[[i]][,1]))
+}
+
+#merge
+clinical_bigtable = merge(clinical[[1]],clinical[[2]],by = 'Record ID')
+clinical_bigtable = merge(clinical_bigtable,clinical[[3]],by = 'Record ID')
+clinical_bigtable = merge(clinical_bigtable,clinical[[4]],by = 'Record ID')
+clinical_bigtable = merge(clinical_bigtable,clinical[[6]],by = 'Record ID')
+clinical_bigtable = merge(clinical_bigtable,clinical[[7]],by = 'Record ID')
+clinical_bigtable = merge(clinical_bigtable,clinical[[8]],by = 'Record ID')
+clinical_bigtable = merge(clinical_bigtable,clinical[[9]],by = 'Record ID')
+clinical_bigtable = merge(clinical_bigtable,batch,by = 'Record ID')
+
+
+write.csv(clinical_bigtable,file.path(params$datapath,'../data/clinical_bigtable.csv'),row.names = F)
+```
+
+
+# session info  
+```{r session, message= T}
+###session
+sessionInfo()
+```

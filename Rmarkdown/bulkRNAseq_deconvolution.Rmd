@@ -1,0 +1,346 @@
+---
+title: "deconvolution of bulk RNAseq from HLCA reference scRNA experiment"
+author: "Sébastien Renaut (sebastien.renaut@criucpq.ulaval.ca)"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    number_sections: F
+params:
+  datapath: 'C:/Users/renseb01/Documents/rnaseq'
+  outputpath: '../..' 
+  hlca: 'C:/Users/renseb01/Documents/scRNA/scRNA/data/HLCA'
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_knit$set(root.dir = params$datapath)
+knitr::opts_chunk$set(echo = F)
+library(Seurat)
+library(omnideconv)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(patchwork)
+library(factoextra)
+library(FactoMineR)
+library(RColorBrewer)
+```
+
+
+# Download a reference Seurat object 
+* Download `hlca_dataset_587k_cells.rds` reference from [here](https://cellxgene.cziscience.com/collections/6f6d381a-7701-4781-935c-db10d30de293)
+* 587k annotated human lung cells
+* Watch out, it's **BIG** (5GB) !
+```{bash download reference, eval=F}
+curl -o local.rds "https://corpora-data-prod.s3.amazonaws.com/7bcad396-49c3-40d9-80c1-16d74e7b88bd/local.rds?AWSAccessKeyId=ASIATLYQ5N5XTNFZ64PH&Signature=nPRw3OfEs2BAJ53VRTUyWaM%2Bj7g%3D&x-amz-security-token=IQoJb3JpZ2luX2VjEG4aCXVzLXdlc3QtMiJHMEUCIFn3rrqkhDNH8Z%2F2UQl%2Bj8cirrNV5AlvILBUr7dIDmSZAiEAj3yBZjO6L4RlbEZcCKGFCerGRCfirs7l%2B5UY2qE44hYq6wMIdxABGgwyMzE0MjY4NDY1NzUiDBMV7F1OUVQgBqAmmCrIA2HOpq%2BUq0pzc04tuUeOEhcMF42Dh3tHXcnykTan1ggtgbRDN9lZJ3oXheGiI9%2FF%2F2K6LsfCNKZjAEqjYqkyA0I%2FMDJCmfMrA8sXxvgENlKHAC%2FeFN4EZe1fL6AzIeY36%2FEt1tEFfQ%2F%2Fi4FLmlG4x9ep89A2OxmfsEMmdgxwbBnIo7FB2AmXq2di5i3ay43M6wBCHaxZ5XCF4ooPQ%2FjzIWcs9VMsLKwxJnC2S%2BeNhYNg3P8yMlQtkci4d5V2avPxdLRxlXFQOyN6VSZPufsZ583m%2BCw7fd2OXI3aIQFUjApE0YE1FILwIGJUlqnXEOE%2BF9QKTFYLTsesucOhKCpGpaBxfJWmi7BHyKz4JkEHpeQYJ1jAZoDb2i%2F6t6wjkfnlz%2BN2c4yrYIbSFeienxQf5LXnwOphMGxhMYwwaYuz4C7EpTCIykaPdPZ790lc%2FK7tjSLa9QODjWA%2B3PYnKXWemUzcTrPcs5j1qbbbXa2sGqWcTK4zPB%2FQREqB%2Ft9nL4oglzUmH4oc1hVF%2B3QZD%2BKMyhuD96nayo5MJ5eqS%2FjRTpobuuOAKTW5vh%2FjK%2F8iV5c8i3u%2F19TNJjXWf1ui%2Fmp%2F0C6exz3qXRSc8TClq4CpBjqlASQ%2BDVWcaEYGT6diPbaIUxlI%2BX184UsHVcZNq%2FKdjLvsB0H9QvJqR%2Fpw1IKRAEv880iFS7qN73MCF1Kw7xS7SvL6PoDic4fzkRzJ9%2BkC0N2lr4SzhErtTc%2B1GyN3CWwH967HfLXq4vPadzvk08TTNTbJAgJEKe84FKHm%2F8wUKhcZhIR6Ek7PpBvn4THSamHKXzPjtnPTAur9THjrY8A8g3ZjCJjlZQ%3D%3D&Expires=1697224687"
+```
+
+
+#Generate the reference matrix for the deconvolution
+```{r reference, eval = F}
+#load HLCA reference
+reference = readRDS(file.path(params$hlca,"hlca_dataset_587k_cells.rds"))
+data = GetAssayData(reference,slot = 'count')0
+
+#keep top10% most variable genes
+variance_genes = FindVariableFeatures(data)
+cutoff = quantile(variance_genes$vst.mean,seq(0.1,by = 0.1))[9]
+variable_data = data[variance_genes$vst.mean>cutoff,]
+
+#keep all annotations & batch (reference study) effect, but only 5% of cell data (5800 cells)
+cell_type_annotations = reference@meta.data[,colnames(reference@meta.data) %in% c('ann_level_1','ann_level_2','ann_level_3','ann_level_4','ann_level_5','ann_finest_level','study')]
+cell_type_annotations$cellname = rownames(cell_type_annotations)
+cell_type_annotations_5percent = cell_type_annotations %>% group_by(ann_finest_level) %>% slice_head(prop = 0.05)
+cell_type_annotations_5percent = cell_type_annotations_5percent[order(cell_type_annotations_5percent$cellname),]
+
+#keep a subset of cells (1%)
+variable_singlecelldata_5percent = variable_data[,colnames(variable_data) %in% cell_type_annotations_5percent$cellname]
+variable_singlecelldata_5percent = variable_singlecelldata_5percent[,order(colnames(variable_singlecelldata_5percent))]
+
+#save Single Cell expression matrix + annotation
+write.csv(cell_type_annotations_5percent,file.path(params$hlca,'cell_type_annotations_5percent.csv'))
+write.csv(variable_singlecelldata_5percent,file.path(params$hlca,'variable_singlecelldata_5percent.csv'))
+```
+
+#Do the bulk RNAseq deconvolution
+```{r real data deconvolution}
+  #1.get clinical data
+  clinical_bigtable = read.csv('data/clinical_bigtable.csv', check.names = F)
+
+  #2.Reference data
+  cell_type_annotations = read.csv(file.path(params$hlca,'cell_type_annotations_5percent.csv'), row.names = 1)
+  variable_singlecelldata_5percent = as.matrix(read.csv(file.path(params$hlca,'variable_singlecelldata_5percent.csv'),row.names = 1))
+
+  #3. get bulkRNAseq data
+  txi = readRDS(file.path(params$datapath,'lord_kallisto/txi.rds'))
+  
+  bulk = as.matrix(txi$abundance[sapply(strsplit(rownames(txi$abundance), ".",fixed = T), "[",1) %in% rownames(variable_singlecelldata_5percent),])
+  bulk = bulk[!duplicated(sapply(strsplit(rownames(bulk), ".",fixed = T), "[",1) ),]
+  rownames(bulk) = sapply(strsplit(rownames(bulk), ".",fixed = T), "[",1) #matrix. 2800 genes X 10 cells. Floats (Counts). Raw abundance (so TPM)
+  bulk = bulk[rowMeans(bulk)>0.001,]
+  
+  #filter reference data
+  sc_data = variable_singlecelldata_5percent[rownames(variable_singlecelldata_5percent) %in% rownames(bulk),] #matrix. 2800 genes X 5802 cells. Integers (Counts). Raw.
+  ct_annotations <- as.character(cell_type_annotations$ann_level_3) #vector. 5802 values. Cell types. characters.
+  batch_ids <- as.character(cell_type_annotations$study) #vector. 5802 values. 11 studies. Characters.
+
+  #2. Build a Signature Matrix
+  signature_matrix_music <- build_model(sc_data, ct_annotations, "music", bulk_gene_expression = bulk, batch_ids = batch_ids)
+
+  if(!file.exists(file.path(params$datapath,'results/deconvolution/deconv_list.RDS')))
+{
+  #3. Deconvolute
+  deconv_music = as.data.frame(deconvolute(bulk_gene_expression=bulk,
+                          signature=signature_matrix_music,
+                          method = "music",
+                          single_cell_object = sc_data,
+                          cell_type_annotations = ct_annotations,
+                          batch_ids = batch_ids))
+
+  #add attributes to the deconvolution object
+  deconv_music$tissue = 'Sain'
+  deconv_music$tissue[grep('Tumeur',rownames(deconv_music))] = 'Tumeur'
+  deconv_music$`Record ID` = sapply(strsplit(rownames(deconv_music), "_"), "[",5)
+
+  #merge clinical data
+  deconv_music_clinical = merge(deconv_music,clinical_bigtable, by = 'Record ID')
+
+  #pivot longer
+  deconv = deconv_music_clinical %>% pivot_longer(names_to = "celltypes",values_to = 'fraction of total', cols = 2:25)
+ 
+  #save for later
+  deconv_list = list(deconv_music,deconv_music_clinical,deconv)
+  saveRDS(deconv_list,file.path(params$datapath,'results/deconvolution/deconv_list.RDS'))} else {
+    deconv_list = readRDS(file.path(params$datapath,'results/deconvolution/deconv_list.RDS'));
+    deconv_music = deconv_list[[1]]
+    deconv_music_clinical = deconv_list[[2]]
+    deconv = deconv_list[[3]] 
+}
+```
+
+
+```{r plots}
+#single cell metadata
+metadata = read.csv("C:/Users/renseb01/Documents/scRNA/scRNA/data/adeno.24samples_metadata.csv",row.names = 1)
+cell_types_sc = table(metadata$predicted.ann_level_3,metadata$method)
+cell_types_sc[,1] = cell_types_sc[,1]/sum(cell_types_sc[,1])
+cell_types_sc[,2] = cell_types_sc[,2]/sum(cell_types_sc[,2])
+cell_types_sc[,3] = cell_types_sc[,3]/sum(cell_types_sc[,3])
+
+#HLCA reference
+cell_types_reference = table(cell_type_annotations$ann_level_3)
+cell_types_reference = cell_types_reference[order(cell_types_reference,decreasing = T)]/sum(cell_types_reference)
+cell_types_reference = data.frame(celltypes = names(cell_types_reference),fraction = c(cell_types_reference),dataset = 'HLCA')
+
+#bulk RNAseq deconvolution
+deconv_summarised = deconv %>% group_by(celltypes) %>% summarise(fraction = mean(`fraction of total`))
+deconv_summarised$dataset = 'bulk RNAseq'
+deconv_summarised = rbind(deconv_summarised,
+                          cell_types_reference,
+                          data.frame(celltypes = rownames(cell_types_sc),fraction = cell_types_sc[,1],dataset = 'Single Cell'),
+                          data.frame(celltypes = rownames(cell_types_sc),fraction = cell_types_sc[,3],dataset = 'Single Nuclei'))
+
+
+#factorise (for order) & keep only the first 12 cell types of the reference (95% of cells)
+deconv_summarised$dataset = factor(deconv_summarised$dataset, levels = c('HLCA','bulk RNAseq','Single Cell', 'Single Nuclei'))
+deconv_summarised$celltypes = factor(deconv_summarised$celltypes, levels = rownames(cell_types_reference))
+deconv_summarised = deconv_summarised[deconv_summarised$celltypes %in% rownames(cell_types_reference)[1:13],]
+
+
+#stacked barplot for total number of cells
+stacked_barplot = deconv_summarised %>%
+ ggplot(aes(x=dataset,y=fraction,fill=celltypes)) +
+  geom_bar(stat="identity") +
+  ylim(c(0,1)) + 
+  scale_fill_manual(values = c(brewer.pal(n = 12, name = "Paired"),'black') ) +
+  ggtitle('RNAseq deconvolution (top95% of cells in reference, 512 Sain, 512 Tumeur)')
+
+
+#tumor_normal_transition Single NUclei boxplots
+tumor_normal_transition = deconv %>%
+  filter(celltypes %in% c('AT1','AT2','B cell lineage','Basal','Dendritic cells','Innate lymphoid cell NK','Macrophages','Monocytes','Multiciliated lineage','Rare','T cell lineages')) %>%
+  ggplot(aes(x=tissue,y=`fraction of total`,fill=tissue)) +  
+  geom_boxplot(varwidth=F) + 
+  ggtitle('Normal -> Tumor transition (RNAseq deconvolution)') + 
+  scale_fill_manual(values = c('darkorange','lightblue')) +
+  facet_grid( . ~celltypes, scales = "free_x", space = "free_x",switch = 'y') 
+
+#a bunch of ANOVAs.
+anova(lm(AT1~tissue,deconv_music_clinical))
+anova(lm(AT2~tissue,deconv_music_clinical))
+anova(lm(Rare~tissue,deconv_music_clinical))
+
+tumor = deconv_music_clinical[deconv_music_clinical$tissue=='Tumeur',]
+anova(lm(Rare~`Tumor_Percentage of Tumor`,tumor))
+anova(lm(`B cell lineage`~`Tumor_stage clinic`,tumor))
+
+
+#Tumor grade versus cell types proportions
+deconv$Tumor_Grade[is.na(deconv$Tumor_Grade)] = 'unknown'
+
+deconv_filtered = deconv %>%
+    filter(celltypes == 'AT1' | celltypes == 'AT2' | celltypes == 'Rare' | celltypes == 'B cell lineage') 
+
+deconv_filtered$celltypes = factor(deconv_filtered$celltypes, levels = c('AT1','AT2','Rare','B cell lineage'))
+
+celltype_specific_plots = deconv_filtered %>% 
+    filter(Tumor_Grade!= 'unknown') %>%
+    filter(tissue != 'Sain') %>%
+    ggplot(aes(x=tissue,y=`fraction of total`,fill=tissue)) +  
+    geom_boxplot(varwidth=F) + 
+    facet_grid(celltypes~Tumor_Grade, scales = "free_y", space = "free_x",switch = 'y') +
+    scale_fill_manual(values = c('darkorange','lightblue')) +
+    ggtitle('Cell type ~ Tumor Grade')
+
+
+pdf(file.path(params$datapath,paste0('results/deconvolution/Figure2_normal_tumor_grade.pdf')),width = 9,height = 6)
+celltype_specific_plots
+dev.off()
+
+
+pdf(file.path(params$datapath,paste0('results/deconvolution/Figure4_stacked_barplot.pdf')),width = 10,height = 12)
+stacked_barplot
+dev.off()
+```
+
+
+#Ground truth (single cell/Nuclei data) # Tumor - normal lineplots
+```{r lineplots}
+#just add empty categories for your line plot
+nb_cells_per_sample = as.data.frame(table(metadata$unique),stringsAsFactors = F)
+metadata_complete = metadata[c(1,1,1,1:nrow(metadata)),]
+metadata_complete$predicted.ann_level_3[c(1,2,3)] = c('lymphoid cell NK','lymphoid cell NK','Basal')
+metadata_complete$method[c(1,2,3)] = c('Nucleus','Nucleus','Nucleus')
+metadata_complete$type[c(1,2,3)] = c('Normal','Tumor','Normal')
+
+#summarise data
+data_summarised = metadata_complete %>% 
+  group_by(predicted.ann_level_1,predicted.ann_level_3,method,type, patient,unique) %>%
+  summarise(n = length(predicted.ann_level_3),.groups='keep')
+
+#add fractions
+data_summarised$fraction = 0
+
+for(i in seq_along(nb_cells_per_sample[,1])){
+  data_summarised$fraction[data_summarised$unique == nb_cells_per_sample$Var1[i]] =  data_summarised$n[data_summarised$unique == nb_cells_per_sample$Var1[i]] / nb_cells_per_sample$Freq[i]*100
+}
+
+#clean up 
+data_summarised$predicted.ann_level_3[data_summarised$predicted.ann_level_3=='Lymphatic EC differentiating'] = 'Lymph. EC diff.'
+data_summarised$predicted.ann_level_3[data_summarised$predicted.ann_level_3=='Lymphatic EC mature'] = 'Lymph. EC matu.'
+data_summarised$predicted.ann_level_3[data_summarised$predicted.ann_level_3=='Multiciliated lineage'] = 'Multicil. lineage' 
+data_summarised$predicted.ann_level_3[data_summarised$predicted.ann_level_3=='Innate lymphoid cell NK'] = 'lymphoid cell NK' 
+
+#remove immune-depleted cells
+data_summarised = data_summarised[data_summarised$method!='immune depleted cells',]
+
+data_summarised2 = data_summarised %>% 
+  group_by(predicted.ann_level_1,predicted.ann_level_3,method,patient) %>%
+  summarise(fractions = fraction[type=='Tumor']/fraction[type=='Normal'],.groups='keep')
+
+#clean-up a bit 
+data_summarised2 = data_summarised2[data_summarised2$predicted.ann_level_3 != 'None',]
+
+###summarise for a lineplots
+data_summarised_fraction =  data_summarised %>% 
+  group_by(predicted.ann_level_1,predicted.ann_level_3,method,type) %>%
+  summarise(fraction = mean(fraction),.groups='keep')
+
+#lineplot tumor normal transition
+lineplots = data_summarised_fraction %>% 
+  filter(predicted.ann_level_3 %in% c('AT1','AT2','B cell lineage','Basal','Dendritic cells','lymphoid cell NK','Macrophages','Monocytes','Multicil. lineage','Rare','T cell lineages')) %>% 
+  ggplot(aes(x=type, y=fraction, group=method)) +
+  geom_line(aes(color=method),linewidth = 2) +
+  geom_point(aes(color=method),size = 6) + 
+  facet_grid(.~predicted.ann_level_3, scales = "free_y") +
+  ggtitle('Normal -> Tumor transition (Single Cell)') + 
+  scale_color_manual(values = scales::hue_pal()(3)[c(1,3)]) +
+  ylab("Percentage of total cellls in dataset") +
+  xlab("")
+
+pdf(file.path(params$datapath,paste0('results/deconvolution/Figure1_normal_tumor_celltypetransition.pdf')),width = 20,height = 12)
+tumor_normal_transition  / lineplots 
+dev.off()
+```
+
+
+```{r PCA n cell types}
+#Principal component analysis
+deconv_pca = PCA(deconv_music_clinical[,2:25],scale = F, graph = F)
+
+pca_loadings = fviz_pca_var(deconv_pca,
+              col.var = "contrib", # Color by contributions to the PC
+              gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
+              repel = TRUE) + ggtitle('PCA loadings (24 cell types)')
+
+pca_tissue = fviz_pca_biplot(deconv_pca,
+                             select.var= list(contrib = 4),
+            col.ind = deconv_music_clinical$tissue, # color by groups
+             geom = 'point',
+             palette = c("#00AFBB",  "#FC4E07"),
+             addEllipses = TRUE, # Concentration ellipses
+             #ellipse.level=0.95,
+           #  ellipse.type = "confidence",
+             legend.title = "Groups",
+             repel = TRUE
+             ) + ggtitle('PCA (samples ~ tissue)')
+
+
+###tumor specific PCAs
+deconv_music_sub = deconv_music_clinical[deconv_music_clinical$tissue == 'Tumeur',]
+deconv_pca_tumor = prcomp(deconv_music_sub[,2:25],scale = F)
+
+#Vital status
+pca_vital = fviz_pca_ind(deconv_pca_tumor,
+             col.ind = deconv_music_sub$`Profil_Vital status`, # color by groups
+             geom = 'point',
+             palette = RColorBrewer::brewer.pal(n = 3, name = "Set1"),
+               addEllipses = TRUE, # Concentration ellipses
+               ellipse.type = "confidence",
+               legend.title = "Vital status",
+             repel = TRUE
+)+ ggtitle('vital status')
+
+#EGFR status
+pca_egfr = fviz_pca_ind(deconv_pca_tumor,
+            col.ind = deconv_music_sub$`TMA_Oncomine_Gene summary (choice=EGFR)`, # color by groups
+             geom = 'point',
+             palette = RColorBrewer::brewer.pal(n = 2, name = "Set1"),
+             addEllipses = TRUE, # Concentration ellipses
+           #  ellipse.type = "confidence",
+             legend.title = "EGFR status",
+             repel = TRUE
+             ) + ggtitle('EGFR status (oncomine)')
+
+#Tumor Grade
+pca_tumorgrade = fviz_pca_ind(deconv_pca_tumor,
+             col.ind = deconv_music_sub$Tumor_Grade, # color by groups
+             geom = 'point',
+             palette = RColorBrewer::brewer.pal(n = 4, name = "Set1"),
+             addEllipses = TRUE, # Concentration ellipses
+             ellipse.type = "confidence",
+            # ellipse.level=0.95,
+               legend.title = "Tumor grade",
+             repel = TRUE
+)+ ggtitle('Tumor grade')
+
+
+pdf(file.path(params$datapath,paste0('results/deconvolution/Figure3_PCAdeconvolution.pdf')),width = 20,height = 12)
+
+pca_loadings +  pca_tissue + pca_vital + pca_egfr + pca_tumorgrade + plot_annotation(tag_levels = 'A')
+
+dev.off()
+
+```
+
+
+
+
+# session info  
+```{r session, message= T}
+###session
+sessionInfo()
+
+```
+
+
