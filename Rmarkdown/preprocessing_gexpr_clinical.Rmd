@@ -26,38 +26,97 @@ txi1 = readRDS(file.path(params$datapath,'part1/txi.rds'))
 txi2 = readRDS(file.path(params$datapath,'part2/txi.rds'))
 txi3 = readRDS(file.path(params$datapath,'part3/txi.rds'))
 txi4 = readRDS(file.path(params$datapath,'part4/txi.rds'))
+txi5 = readRDS(file.path(params$datapath,'part5/txi.rds')) #batch 5 are mostly reruns
 
+#
 txi = txi1
 txi$abundance = cbind(txi1$abundance,txi2$abundance,txi3$abundance,txi4$abundance)
 txi$counts  = cbind(txi1$counts,txi2$counts,txi3$counts,txi4$counts)
 txi$length = cbind(txi1$length,txi2$length,txi3$length,txi4$length)
+
+#filter the data to remove samples that were sequenced twice. (keep sample for which a pair had the larger nb of reads)
+RecordID_rerun = sapply(strsplit(colnames(txi5$length), "_"), "[",5)
+RecordID_rerun = RecordID_rerun[!duplicated(RecordID_rerun)]
+
+#modify dataframes
+for(i in seq_along(RecordID_rerun)){
+  abundance_rerun = txi5$abundance[,grep(RecordID_rerun[i],colnames(txi5$abundance))]
+  counts_rerun = txi5$counts[,grep(RecordID_rerun[i],colnames(txi5$counts))]
+  length_rerun = txi5$length[,grep(RecordID_rerun[i],colnames(txi5$length))]
   
+  #original counts
+  counts = txi$counts[,grep(RecordID_rerun[i],colnames(txi$counts))]
+  
+  
+  #add a new sample
+  if(sum(counts) == 0){
+    txi$abundance = cbind(txi$abundance,abundance_rerun)
+    txi$counts = cbind(txi$counts,counts_rerun)
+    txi$length = cbind(txi$length,length_rerun)
+  
+    print(paste0('adding sample: ',RecordID_rerun[i]))
+    }
+  
+  
+  #replacing new sample
+  if((sum(counts) > 0) & (min(colSums(counts_rerun)) > min(colSums(counts)))){
+    txi$abundance = cbind(txi$abundance,abundance_rerun)
+    txi$counts = cbind(txi$counts,counts_rerun)
+    txi$length = cbind(txi$length,length_rerun)
+    
+    #but remove old samples
+    txi$abundance = txi$abundance[,!(colnames(txi$abundance) %in% colnames(counts))]
+    txi$counts = txi$counts[,!(colnames(txi$counts) %in% colnames(counts))]
+    txi$length = txi$length[,!(colnames(txi$length) %in% colnames(counts))]
+    
+    print(paste0('Replacing new sample: ',RecordID_rerun[i]))
+  }
+  
+  
+  #not replacing if the original sample was better.
+  if((sum(counts) > 0) & (min(colSums(counts_rerun)) < min(colSums(counts)))){
+    print(paste0('NOT replacing new sample: ',RecordID_rerun[i]))
+  } 
+}
+
 saveRDS(txi,file.path(params$datapath,'txi.rds'))
-
-clinical_temp = data.frame(sample = colnames(txi$length), 
-                      'Record ID' = sapply(strsplit(colnames(txi$length), "_"), "[",5),
-                      tissue = sapply(strsplit(colnames(txi$length), "_"), "[",6),
-                      batch = c(rep('batch1',ncol(txi1$abundance)),rep('batch2',ncol(txi2$abundance)),rep('batch3',ncol(txi3$abundance)),rep('batch4',ncol(txi4$abundance))),
-                      check.names = F)
-
-#batch info
-batch = clinical_temp[,c(2,4)]
-batch = batch[!duplicated(batch),]
 ```
 
 ## clinical data
 ```{r clinical data}
-files = list.files(file.path(params$datapath,'../data/RNAseq_512_données'),full.names = T)
+files = list.files(file.path(params$datapath,'../data/RNAseq_ADK_v.2022'),full.names = T)
+
+#
+clinical_temp = data.frame(sample = colnames(txi$length), 
+                      'Record ID' = sapply(strsplit(colnames(txi$length), "_"), "[",5),
+                      tissue = sapply(strsplit(colnames(txi$length), "_"), "[",6),
+                      batch = 'batch1',
+                      check.names = F)
+
+clinical_temp$batch[clinical_temp$sample %in% colnames(txi1$length)] = 'batch1'
+clinical_temp$batch[clinical_temp$sample %in% colnames(txi2$length)] = 'batch2'
+clinical_temp$batch[clinical_temp$sample %in% colnames(txi3$length)] = 'batch3'
+clinical_temp$batch[clinical_temp$sample %in% colnames(txi4$length)] = 'batch4'
+clinical_temp$batch[clinical_temp$sample %in% colnames(txi5$length)] = 'batch5'
+
+
+#batch info
+batch = clinical_temp[,c(2,4)]
+batch = batch[!duplicated(batch),]
+
 
 clinical = list()
 temp_names = c()
 
 #load all clinical data
 for(i in seq_along(files)){
-  temp = read_xlsx(files[i])
+  #temp = read_xlsx(files[i])
+  temp = read.csv(files[i], check.names = F)
   temp_name = tail(strsplit(files[i],'/')[[1]],1)
-  temp_names[i] = gsub('_2023-09-20.xlsx','',temp_name)
-  
+ #temp_names[i] = gsub('_2023-09-20.xlsx','',temp_name)
+  temp_names[i] = gsub('_2023-11-24.csv','',temp_name)
+  temp_names[i] = gsub('LORDV2-','',temp_names[i])
+     
   clinical[[i]] = temp
 
   colnames(clinical[[i]])[-1] = paste0(temp_names[i],'_',colnames(clinical[[i]])[-1])
@@ -73,17 +132,28 @@ for(i in seq_along(files)){
 }
 
 #merge
-clinical_bigtable = merge(clinical[[1]],clinical[[2]],by = 'Record ID')
-clinical_bigtable = merge(clinical_bigtable,clinical[[3]],by = 'Record ID')
-clinical_bigtable = merge(clinical_bigtable,clinical[[4]],by = 'Record ID')
+clinical_bigtable = merge(clinical[[1]],clinical[[3]],by = 'Record ID')
+clinical_bigtable = merge(clinical_bigtable,clinical[[5]],by = 'Record ID')
 clinical_bigtable = merge(clinical_bigtable,clinical[[6]],by = 'Record ID')
 clinical_bigtable = merge(clinical_bigtable,clinical[[7]],by = 'Record ID')
-clinical_bigtable = merge(clinical_bigtable,clinical[[8]],by = 'Record ID')
-clinical_bigtable = merge(clinical_bigtable,clinical[[9]],by = 'Record ID')
+#clinical_bigtable = merge(clinical_bigtable,clinical[[7]],by = 'Record ID')
+#clinical_bigtable = merge(clinical_bigtable,clinical[[8]],by = 'Record ID')
+#clinical_bigtable = merge(clinical_bigtable,clinical[[9]],by = 'Record ID')
 clinical_bigtable = merge(clinical_bigtable,batch,by = 'Record ID')
 
 
-write.csv(clinical_bigtable,file.path(params$datapath,'../data/clinical_bigtable.csv'),row.names = F)
+#tumor volume (X Y Z)
+x = clinical_bigtable$`Pathology_Tumor_size_tumx`
+y = clinical_bigtable$`Pathology_Tumor_size_tumy`
+z = clinical_bigtable$`Pathology_Tumor_size_tumz`
+
+x[is.na(x)] = mean(x, na.rm=T)
+y[is.na(y)] = mean(y, na.rm=T)
+z[is.na(z)] = mean(z, na.rm=T)
+
+clinical_bigtable$`Pathology_Tumor_size_tumxyz` = x*y*z / 1000
+
+write.csv(clinical_bigtable,file.path(params$datapath,'../data/clinical_bigtable_v2.csv'),row.names = F)
 ```
 
 

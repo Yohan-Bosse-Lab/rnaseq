@@ -6,3 +6,5 @@ sandbox/*
 *png
 *pdf
 data/reference_transcriptome/
+Rmarkdown/deprecated/
+Rmarkdown/*html
