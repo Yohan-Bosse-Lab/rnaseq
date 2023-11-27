@@ -1,0 +1,225 @@
+---
+title: "bulk RNAseq PCA"
+author: "Sébastien Renaut (sebastien.renaut@criucpq.ulaval.ca)"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    number_sections: F
+params:
+  datapath: 'C:/Users/renseb01/Documents/rnaseq'
+  outputpath: '../..' 
+  hlca: 'C:/Users/renseb01/Documents/scRNA/scRNA/data/HLCA'
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_knit$set(root.dir = params$datapath)
+knitr::opts_chunk$set(echo = F)
+library(Seurat)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(patchwork)
+library(factoextra)
+library(FactoMineR)
+library(RColorBrewer)
+```
+
+
+#bulk RNAseq 
+```{r PCA on Gexpr}
+#clinical data
+clinical_bigtable = read.csv(file.path(params$datapath,'data/clinical_bigtable_v2.csv'), check.names = F)
+
+clinical_bigtable$TMA_Oncomine_gene = 'none'
+clinical_bigtable$TMA_Oncomine_gene[nchar(clinical_bigtable$`TMA_Oncomine_driv mut gene`) > 0 ] = 'other'
+clinical_bigtable$TMA_Oncomine_gene[clinical_bigtable$`TMA_Oncomine_driv mut gene` == 'KRAS' ] = 'KRAS'
+clinical_bigtable$TMA_Oncomine_gene[clinical_bigtable$`TMA_Oncomine_driv mut gene` == 'EGFR' ] = 'EGFR'
+clinical_bigtable$TMA_Oncomine_gene[grep('ERBB',clinical_bigtable$`TMA_Oncomine_driv mut gene`)] = 'ERBB'
+clinical_bigtable$TMA_Oncomine_gene[clinical_bigtable$`TMA_Oncomine_driv mut gene` == 'PIK3CA' ] = 'PIK3CA'
+
+clinical_bigtable$TMA_Oncomine_gene[clinical_bigtable$`TMA_Oncomine_driv mut gene` == 'BRAF' ] = 'BRAF'
+
+
+clinical_bigtable$genesss = 'none'
+clinical_bigtable$genesss[clinical_bigtable$`TMA_Oncomine_Gene summary` == 'KRAS,TP53'] = 'KRAS,TP53'
+clinical_bigtable$genesss[clinical_bigtable$`TMA_Oncomine_Gene summary` == ''] = 'none'
+clinical_bigtable$genesss[clinical_bigtable$`TMA_Oncomine_Gene summary` == 'KRAS'] = 'KRAS'
+clinical_bigtable$genesss[clinical_bigtable$`TMA_Oncomine_Gene summary` == 'TP53'] = 'TP53'
+clinical_bigtable$genesss[clinical_bigtable$`TMA_Oncomine_Gene summary` == 'EGFR,TP53'] = 'EGFR,TP53'
+clinical_bigtable$genesss[clinical_bigtable$`TMA_Oncomine_Gene summary` == 'EGFR'] = 'EGFR'
+clinical_bigtable$genesss[clinical_bigtable$`TMA_Oncomine_Gene summary` == 'MET'] = 'MET'
+
+#gexpr data
+txi = readRDS(file.path(params$datapath,'lord_kallisto/txi.rds'))
+
+#standard deviation
+sd = rep(0,nrow(txi$abundance))
+mean = rep(0,nrow(txi$abundance))
+for(i in seq_along(txi$abundance[,1])){
+  sd[i] = sd(txi$abundance[i,])
+  mean[i] = mean(txi$abundance[i,])
+  }
+
+#gexpr top 5% most variable genes.
+gexpr = t(as.matrix(txi$abundance)[sd>quantile(sd,seq(0,1,by = 0.01))[95],])
+
+tissue  = data.frame(tissue = rep('Sain',nrow(gexpr)))
+tissue$tissue[grep('Tumeur',rownames(gexpr))] = 'Tumeur'
+tissue$`Record ID` = sapply(strsplit(rownames(gexpr), "_"), "[",5)
+tissue$unique_Record_ID = paste0(tissue$`Record ID`,'_',tissue$tissue)
+
+gexpr = gexpr[order(tissue$unique_Record_ID),]
+tissue = tissue[order(tissue$unique_Record_ID),]
+
+#merge clinical data
+gexpr_clinical = merge(tissue,clinical_bigtable, by = 'Record ID')
+
+gexpr_PCA = PCA(gexpr,graph = F,scale = F)
+
+pca_loadings = fviz_pca_var(gexpr_PCA,select.var= list(contrib = 10),
+              col.var = "contrib", # Color by contributions to the PC
+              gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
+              repel = TRUE) + ggtitle('PCA loadings (top5% most variable genes)')
+
+pca_tissue = fviz_pca_ind(gexpr_PCA,
+                col.ind = gexpr_clinical$tissue, # color by groups
+                geom = 'point', addEllipses = T, repel =T, legend.title = "Tissue") + ggtitle('PCA (samples ~ tissue)')
+
+pca_batch = fviz_pca_ind(gexpr_PCA,
+                col.ind = gexpr_clinical$batch,
+                geom = 'point', addEllipses = T, repel =T, legend.title = "Sequencing batches") + ggtitle('PCA (samples ~ sequencing batch)')
+
+
+
+#tumor specific
+###tumor specific
+gexpr_tumor = gexpr[tissue$tissue=='Tumeur',]
+#tissue_tumor = tissue[tissue$tissue=='Tumeur',]
+gexpr_clinical_tumor = gexpr_clinical[gexpr_clinical$tissue=='Tumeur',]
+
+tumor_pca = prcomp(gexpr_tumor,scale = F)
+
+
+pca_tumor_grade = fviz_pca_ind(tumor_pca,
+                col.ind = gexpr_clinical_tumor$Pathology_Tumor_Grade,geom = 'point', addEllipses = F, repel =T, legend.title = "Tumor grade") + ggtitle('PCAgexpr (samples ~ Tumor_Grade)')
+
+pca_tumor_drivermutation = fviz_pca_ind(tumor_pca,
+                col.ind = gexpr_clinical_tumor$TMA_Oncomine_gene,geom = 'point', addEllipses = F, repel =T, legend.title = "Presence of driver mutation") + ggtitle('PCAgexpr (samples ~ driver mutation)')
+
+
+pdf(file.path(params$datapath,paste0('results/Gexpr/Figure4_PCA_gexpr.pdf')),width = 20,height = 12)
+pca_loadings +  pca_tissue + pca_batch + pca_tumor_grade + pca_tumor_drivermutation + plot_annotation(tag_levels = 'A')
+dev.off()
+
+```
+
+```{r survival}
+library(lubridate)
+library(survival)
+library(survminer)
+
+#
+lung = data.frame(os = clinical_bigtable$`Follow-up_O.S. (2022)`,
+                     status = ifelse(clinical_bigtable$`Profil_visit_history_Vital status` =="Alive",0,1),
+                     grade = clinical_bigtable$Pathology_Tumor_Grade,
+                  driver_mutation = clinical_bigtable$TMA_Oncomine_gene,
+                  tp53= clinical_bigtable$`TMA_Oncomine_tp53 gene 1`,
+                  tumor_size =0,
+                  sex = clinical_bigtable$`Profil_visit_history_Sex at birth`,
+                  pfs = clinical_bigtable$`Follow-up_PFS (2022)`,
+                  predominant_feature = clinical_bigtable$`Pathology_Tumor_Predominant feature`,
+                  genesss = clinical_bigtable$genesss)
+
+                 
+lung$tumor_size[clinical_bigtable$`Pathology_Tumor_size_tumxyz`<=7.5] = 'small'
+lung$tumor_size[(clinical_bigtable$`Pathology_Tumor_size_tumxyz`>7.5) & (clinical_bigtable$`Pathology_Tumor_size_tumxyz`<18.0)] = 'medium'
+lung$tumor_size[(clinical_bigtable$`Pathology_Tumor_size_tumxyz`>=18.0) & (clinical_bigtable$`Pathology_Tumor_size_tumxyz`<100)] = 'large'        
+lung$tumor_size[clinical_bigtable$`Pathology_Tumor_size_tumxyz`>=100] = 'very large'
+lung$tumor_size = factor(lung$tumor_size,levels = c('small','medium','large','very large'))
+
+fit <- survfit(Surv(os, status) ~ tumor_size, data = lung)
+tumor_size = ggsurvplot(fit,
+          pval = TRUE, conf.int = F,
+          risk.table = TRUE, # Add risk table
+          risk.table.col = "strata", # Change risk table color by groups
+          linetype = "strata", # Change line type by groups
+         # surv.median.line = "hv", # Specify median survival
+          ggtheme = theme_bw(), # Change ggplot2 theme
+          legend.labs = c('small [0-7.5]','medium [7.5-18]','large [18-100]','very large [100-1990]'),
+          palette = c("#E7B800", "#2E9FDF",'red','purple')) + ggtitle('Overall survival ~ Tumor Volume (cm3)') + xlab('Time (days)')
+
+#tumor grade
+lung_tumor = lung[lung$grade!= '',]
+fit <- survfit(Surv(os, status) ~ grade, data = lung_tumor)
+tumor_grade = ggsurvplot(fit,
+          pval = TRUE, conf.int = F,
+          risk.table = TRUE, # Add risk table
+          risk.table.col = "strata", # Change risk table color by groups
+          linetype = "strata", # Change line type by groups
+         # surv.median.line = "hv", # Specify median survival
+          ggtheme = theme_bw(), # Change ggplot2 theme
+          legend.labs = c('Grade1','Grade2','Grade3','Grade4'),
+          palette = c("#E7B800", "#2E9FDF",'red','purple')) + ggtitle('Overall survival ~ Tumor Grade') + xlab('Time (days)')
+
+#predominant pattern
+lung_pattern = lung[lung$predominant_feature!= '',]
+fit <- survfit(Surv(os, status) ~ driver_mutation , data = lung_pattern)
+predominant_feature = ggsurvplot(fit,
+          pval = TRUE, conf.int = F,
+          risk.table = TRUE, # Add risk table
+          risk.table.col = "strata", # Change risk table color by groups
+          linetype = "strata", # Change line type by groups
+         # surv.median.line = "hv", # Specify median survival
+          ggtheme = theme_bw(), # Change ggplot2 theme
+          legend.labs = c('Acinar','Lepidic','Micropapillary','Papillary','Solid'),
+          palette = c("#E7B800", "#2E9FDF",'red','purple','black')) + ggtitle('Overall survival ~ Predominant type') + xlab('Time (days)')
+
+
+
+#
+lung_driver = lung[lung$genesss == 'EGFR' |lung$genesss == 'KRAS', ]
+fit <- survfit(Surv(os, status) ~ genesss, data = lung_driver)
+driver_mutation = ggsurvplot(fit,
+          pval = TRUE, conf.int = T,
+          risk.table = TRUE, # Add risk table
+          risk.table.col = "strata", # Change risk table color by groups
+          linetype = "strata", # Change line type by groups
+         # surv.median.line = "hv", # Specify median survival
+          ggtheme = theme_bw(), #Change ggplot2 theme
+          legend.labs = c('EGFR','KRAS'),
+          palette = c("#2E9FDF",'red')) + ggtitle('Overall survival ~ EGFR / KRAS driver mutations') + xlab('Time (days)')
+
+
+#save plots
+pdf(file.path(params$datapath,paste0('results/Gexpr/Figure6_driver_mutation.pdf')),width = 8,height = 10)
+print(driver_mutation, newpage = F)
+dev.off()
+
+
+#save plots
+pdf(file.path(params$datapath,paste0('results/Gexpr/Figure6_tumor_grade_OS.pdf')),width = 8,height = 10)
+print(tumor_grade, newpage = F)
+dev.off()
+
+
+pdf(file.path(params$datapath,paste0('results/Gexpr/Figure6_pattern_OS.pdf')),width = 8,height = 10)
+print(predominant_feature, newpage = F)
+dev.off()
+
+pdf(file.path(params$datapath,paste0('results/Gexpr/Figure6_tumor_size_OS.pdf')),width = 8,height = 10)
+print(tumor_size, newpage = F)
+dev.off()
+```
+
+
+
+
+# session info  
+```{r session, message= T}
+###session
+sessionInfo()
+
+```
+
+
