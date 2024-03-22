@@ -65,12 +65,12 @@ kallisto <- function(trim1 = 'out/fastq.trim/RNA_0006_5598_Tumeur_R1_val_1.fq.gz
 #==========================================
 # TxDb object step
 #==========================================
-ref_txb <- function(txdb.dir = "data/reference_transcriptome/gencode.v43.annotation.gtf",
-                    txdb.file = "data/reference_transcriptome/gencode.v43.annotation.sqlite"){
+ref_txb <- function(txdb.dir = "data/reference_transcriptome/gencode.v44.annotation.gtf",
+                    txdb.file = "data/reference_transcriptome/gencode.v44.annotation.sqlite"){
     
     # Create TxDb database and save to SQLite for later use
     gtf = file.path(txdb.dir)
-    txdb.filename = file.path("data/reference_transcriptome/gencode.v43.annotation.sqlite")
+    txdb.filename = file.path("data/reference_transcriptome/gencode.v44.annotation.sqlite")
     txdb = GenomicFeatures::makeTxDbFromGFF(gtf)
     AnnotationDbi::saveDb(txdb, txdb.filename)
 }
@@ -83,7 +83,7 @@ ref_txb <- function(txdb.dir = "data/reference_transcriptome/gencode.v43.annotat
 tximp_counts = function(#quant.dir = "out/kallisto",
                         sequencing_files =  sequences(trim.dir=trim.dir)[[5]],
                         out.dir = "out/gene_counts",
-                        txdb.file = "data/reference_transcriptome/gencode.v43.annotation.sqlite"){
+                        txdb.file = "data/reference_transcriptome/gencode.v44.annotation.sqlite"){
     
     # Load TxDB & create tx2gene
     txdb = AnnotationDbi::loadDb(txdb.file)
@@ -118,8 +118,8 @@ kallisto_rnaseq <- function(idx.dir ='data/index',
                             quant.dir = 'out/kallisto',
                             out.dir  = 'out',
                             threads = 12,
-                            txdb.dir = "data/reference_transcriptome/gencode.v43.annotation.gtf",
-                            txdb.file = "data/reference_transcriptome/gencode.v43.annotation.sqlite",
+                            txdb.dir = "data/reference_transcriptome/gencode.v44.annotation.gtf",
+                            txdb.file = "data/reference_transcriptome/gencode.v44.annotation.sqlite",
                             nbfiles = params$nbfiles,
                             fqdir = ''){
  

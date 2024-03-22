@@ -18,7 +18,7 @@ option_list = list(
     make_option( "--genomeindexdir",type="character", default='data/reference_genome/chr1_small_index', 
                  help="reference genome index directory [default %default]", metavar="character"),
     
-    make_option( "--annotationgtf",type="character", default='data/reference_genome/gencode.v43.primary_assembly.annotation_small.gtf', 
+    make_option( "--annotationgtf",type="character", default='data/reference_genome/gencode.v44.primary_assembly.annotation_small.gtf', 
                  help="reference genome gtf file [default %default]", metavar="character"),
     
     make_option( "--genomefasta",type="character", default='data/reference_genome/chr1_small.fa', 
