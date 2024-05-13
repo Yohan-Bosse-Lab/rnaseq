@@ -28,21 +28,30 @@ txi3 = readRDS(file.path(params$datapath,'part3/txi.rds'))
 txi4 = readRDS(file.path(params$datapath,'part4/txi.rds'))
 txi5 = readRDS(file.path(params$datapath,'part5/txi.rds')) #batch 5 are mostly reruns
 
+txi_all = list(txi1,txi2,txi3,txi4,txi5)
+
 #
-txi = txi1
-txi$abundance = cbind(txi1$abundance,txi2$abundance,txi3$abundance,txi4$abundance)
-txi$counts  = cbind(txi1$counts,txi2$counts,txi3$counts,txi4$counts)
-txi$length = cbind(txi1$length,txi2$length,txi3$length,txi4$length)
+for(i in 1:5){
+  colnames(txi_all[[i]]$abundance) = paste0('LORD-YB-P03_part',i,'/',colnames(txi_all[[i]]$abundance) )
+  colnames(txi_all[[i]]$counts) = paste0('LORD-YB-P03_part',i,'/',colnames(txi_all[[i]]$counts) )
+  colnames(txi_all[[i]]$length) = paste0('LORD-YB-P03_part',i,'/',colnames(txi_all[[i]]$length) )
+}
+
+#
+txi = txi_all[[1]]
+txi$abundance = cbind(txi_all[[1]]$abundance,txi_all[[2]]$abundance,txi_all[[3]]$abundance,txi_all[[4]]$abundance)
+txi$counts  = cbind(txi_all[[1]]$counts,txi_all[[2]]$counts,txi_all[[3]]$counts,txi_all[[4]]$counts)
+txi$length = cbind(txi_all[[1]]$length,txi_all[[2]]$length,txi_all[[3]]$length,txi_all[[4]]$length)
 
 #filter the data to remove samples that were sequenced twice. (keep sample for which a pair had the larger nb of reads)
-RecordID_rerun = sapply(strsplit(colnames(txi5$length), "_"), "[",5)
+RecordID_rerun = sapply(strsplit(colnames(txi_all[[5]]$length), "_"), "[",6)
 RecordID_rerun = RecordID_rerun[!duplicated(RecordID_rerun)]
 
 #modify dataframes
 for(i in seq_along(RecordID_rerun)){
-  abundance_rerun = txi5$abundance[,grep(RecordID_rerun[i],colnames(txi5$abundance))]
-  counts_rerun = txi5$counts[,grep(RecordID_rerun[i],colnames(txi5$counts))]
-  length_rerun = txi5$length[,grep(RecordID_rerun[i],colnames(txi5$length))]
+  abundance_rerun = txi_all[[5]]$abundance[,grep(RecordID_rerun[i],colnames(txi_all[[5]]$abundance))]
+  counts_rerun = txi_all[[5]]$counts[,grep(RecordID_rerun[i],colnames(txi_all[[5]]$counts))]
+  length_rerun = txi_all[[5]]$length[,grep(RecordID_rerun[i],colnames(txi_all[[5]]$length))]
   
   #original counts
   counts = txi$counts[,grep(RecordID_rerun[i],colnames(txi$counts))]
@@ -78,6 +87,11 @@ for(i in seq_along(RecordID_rerun)){
     print(paste0('NOT replacing new sample: ',RecordID_rerun[i]))
   } 
 }
+
+write.csv(colnames(txi$length),file.path(params$datapath,'txi_colnames.csv'),row.names = F)
+
+colnames(txi$abundance) = sapply(strsplit(colnames(txi$abundance), "/"), "[",2)
+colnames(txi$counts) = sapply(strsplit(colnames(txi$counts), "/"), "[",2)
 
 saveRDS(txi,file.path(params$datapath,'txi.rds'))
 ```
