@@ -7,4 +7,5 @@ Rscript R/rna_pipeline.R QC \
 --fastqc fastqc
 
 
-#make sure you activate  the  Rbase conda environnement
+#make sure you activate the Rbase conda environnement to install the proper R librairies.
+#You also need to have fastqc installed in you PATH, or need to specify where it with the --fastqc option. 
