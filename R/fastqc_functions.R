@@ -103,7 +103,7 @@ fastqc_wrapper = function(fq.dir = 'path',
         qc_stats =  merge(qc_stats,rin,all.x=T)
     }
     
-    qc_stats$type = ifelse(regexpr('umeur',qc_stats$sample)>0,'Tumeur','Sain')
+    qc_stats$type = ifelse(regexpr('tum[e-r]+',tolower(qc_stats$sample))>0,'Tumeur','Sain')
     qc_stats$direction = ifelse(regexpr('_R1',qc_stats$sample)>0,'R1','R2')
     qc_stats$tot.seq =  as.numeric(qc_stats$tot.seq) / 1000000
     
