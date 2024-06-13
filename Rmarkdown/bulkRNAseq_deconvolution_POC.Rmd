@@ -71,9 +71,9 @@ if (!dir.exists(file.path(params$deconvolution,'results'))){
 #Generate the reference matrix for the deconvolution
 ```{r reference, eval = T}
 #load HLCA reference
-#reference = readRDS(file.path(params$hlca,"hlca_dataset_587k_cells.rds"))
-#reference@meta.data$cellname = rownames(reference@meta.data)
-#reference@meta.data = as.data.frame(lapply(reference@meta.data, as.character))
+reference = readRDS(file.path(params$hlca,"hlca_dataset_587k_cells.rds"))
+reference@meta.data$cellname = rownames(reference@meta.data)
+reference@meta.data = as.data.frame(lapply(reference@meta.data, as.character))
 data = GetAssayData(reference,slot = 'count')
 
 #keep top 10% most variable genes as a reference for the deconvolution
