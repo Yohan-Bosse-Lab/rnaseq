@@ -9,7 +9,7 @@ params:
   datapath: 'C:/Users/renseb01/Documents/rnaseq'
   outputpath: '../..' 
   hlca: 'C:/Users/renseb01/Documents/scRNA/scRNA/data/HLCA'
-  deconvolution_POC: 'C:/Users/renseb01/Documents/rnaseq/deconvolution_POC'
+  deconvolution: 'C:/Users/renseb01/Documents/rnaseq/deconvolution'
   cibersortX: FALSE
 ---
 
@@ -48,17 +48,22 @@ if (!dir.exists(params$datapath)){
 if (!dir.exists(params$hlca)){ 
   warning(paste0('Dir: ',params$hlca,' does not exist. Please check')) }
 
-if (!dir.exists(params$deconvolution_POC)){ 
-  warning(paste0('Dir: ',params$deconvolution_POC,' does not exist. Please check')) }
+if (!dir.exists(params$deconvolution)){ 
+  warning(paste0('Dir: ',params$deconvolution,' does not exist. Please check')) }
 
-if (!dir.exists(file.path(params$deconvolution_POC,'music'))){ 
-  warning(paste0(file.path(params$deconvolution_POC,'music'),' does not exist. I will create it')) 
-  dir.create(file.path(params$deconvolution_POC,'music'))
+if (!dir.exists(file.path(params$deconvolution,'music'))){ 
+  warning(paste0(file.path(params$deconvolution,'music'),' does not exist. I will create it')) 
+  dir.create(file.path(params$deconvolution,'music'))
   }
 
-if (!dir.exists(file.path(params$deconvolution_POC,'cibersortX'))){ 
-  warning(paste0(file.path(params$deconvolution_POC,'cibersortX'),' does not exist. I will create it')) 
-  dir.create(file.path(params$deconvolution_POC,'cibersortX'))
+if (!dir.exists(file.path(params$deconvolution,'cibersortX'))){ 
+  warning(paste0(file.path(params$deconvolution,'cibersortX'),' does not exist. I will create it')) 
+  dir.create(file.path(params$deconvolution,'cibersortX'))
+}
+
+if (!dir.exists(file.path(params$deconvolution,'results'))){ 
+  warning(paste0(file.path(params$deconvolution,'results'),' does not exist. I will create it')) 
+  dir.create(file.path(params$deconvolution,'results'))
   }
 ```
 
@@ -88,8 +93,8 @@ for(i in 1:6){
   variable_singlecelldata_Xpercent = variable_singlecelldata_Xpercent[,order(colnames(variable_singlecelldata_Xpercent))]
 
   #save Single Cell expression matrix + annotation music
-  write.csv(cell_type_annotations_Xpercent,file.path(params$deconvolution_POC,paste0('music/cell_type_annotations_',levels[i],'_Xpercent.csv')))
-  write.csv(variable_singlecelldata_Xpercent,file.path(params$deconvolution_POC,paste0('music/variable_singlecelldata_',levels[i],'_Xpercent.csv')))
+  write.csv(cell_type_annotations_Xpercent,file.path(params$deconvolution,paste0('music/cell_type_annotations_',levels[i],'_Xpercent.csv')))
+  write.csv(variable_singlecelldata_Xpercent,file.path(params$deconvolution,paste0('music/variable_singlecelldata_',levels[i],'_Xpercent.csv')))
   
   #cibersortx formatting
   if(params$cibersortX) {
@@ -97,7 +102,7 @@ for(i in 1:6){
     variable_singlecelldata_Xpercent = as.matrix(variable_singlecelldata_Xpercent)
     variable_singlecelldata_Xpercent = cbind(rownames(variable_singlecelldata_Xpercent),variable_singlecelldata_Xpercent)
     colnames(variable_singlecelldata_Xpercent)[1] = 'gene'
-    write.table(variable_singlecelldata_Xpercent,file.path(params$deconvolution_POC,paste0('cibersortX/variable_singlecelldata_',levels[i],'_Xpercent_cibersortx.txt')),sep = '\t',quote = F,row.names = F)
+    write.table(variable_singlecelldata_Xpercent,file.path(params$deconvolution,paste0('cibersortX/variable_singlecelldata_',levels[i],'_Xpercent_cibersortx.txt')),sep = '\t',quote = F,row.names = F)
     
     if(i == 1) {
       #. get the bulkRNAseq data
@@ -112,7 +117,7 @@ for(i in 1:6){
   
       #for cibersortX write the bulk, because we need it as input.
       bulk_cibersort = data.frame(gene = rownames(bulk),bulk)
-      write.table(bulk_cibersort,file.path(params$deconvolution_POC,paste0('cibersortX/bulk_cibersortx.txt')),sep = '\t',quote = F,row.names = F)
+      write.table(bulk_cibersort,file.path(params$deconvolution,paste0('cibersortX/bulk_cibersortx.txt')),sep = '\t',quote = F,row.names = F)
     }
   }
   print(paste0('Done i: ',i, ' The time is:',Sys.time()))
@@ -124,19 +129,19 @@ for(i in 1:6){
 #Do the bulk RNAseq deconvolution
 ```{r real data deconvolution}
   #1.get clinical data
-  #clinical_bigtable = read.csv(file.path(params$datapath,'data/clinical_bigtable_v2.csv'), check.names = F)
+  if(file.exists(file.path(params$datapath,'data/clinical_bigtable_v2.csv'))) clinical_bigtable = read.csv(file.path(params$datapath,'data/clinical_bigtable_v2.csv'), check.names = F)
 
   #3. get bulkRNAseq data
   txi = readRDS(file.path(params$datapath,'lord_kallisto/txi.rds'))
 
   deconv_music = list()
   
-  if(!file.exists(file.path(params$datapath,'results/deconvolution/deconv_music.RDS'))){
+  if(!file.exists(file.path(params$deconvolution,'results/deconv_music.RDS'))){
   
   for(i in 1:6){
   #2.Reference data
-  cell_type_annotations_Xpercent = read.csv(file.path(params$deconvolution_POC,paste0('music/cell_type_annotations_',levels[i],'_Xpercent.csv')), row.names = 1)
-  variable_singlecelldata_Xpercent = as.matrix(read.csv(file.path(params$deconvolution_POC,paste0('music/variable_singlecelldata_',levels[i],'_Xpercent.csv')),row.names = 1))
+  cell_type_annotations_Xpercent = read.csv(file.path(params$deconvolution,paste0('music/cell_type_annotations_',levels[i],'_Xpercent.csv')), row.names = 1)
+  variable_singlecelldata_Xpercent = as.matrix(read.csv(file.path(params$deconvolution,paste0('music/variable_singlecelldata_',levels[i],'_Xpercent.csv')),row.names = 1))
 
   bulk = as.matrix(txi$abundance[sapply(strsplit(rownames(txi$abundance), ".",fixed = T), "[",1) %in% rownames(variable_singlecelldata_Xpercent),])
  
@@ -146,14 +151,7 @@ for(i in 1:6){
   rmean = rowMeans(bulk)
   bulk = bulk[rmean>0.001,]
   
-  #bulk = bulk[rmean>quantile(rmean,seq(0,1,by=0.1))[10],]
-  
-  #for cibersortX write the bulk, because we need it as input.
-  #if(i == 1){
- #   bulk_cibersort = data.frame(gene = rownames(bulk),bulk)
- #   write.table(bulk_cibersort,file.path(params$deconvolution_POC,paste0('cibersortX/bulk_cibersortx.txt')),sep = '\t',quote = F,row.names = F)
- # }
-  
+
   #filter genes in reference data
   sc_data = variable_singlecelldata_Xpercent[rownames(variable_singlecelldata_Xpercent) %in% rownames(bulk),] #matrix. 2800 genes X 5802 cells. Integers (Counts). Raw.
   ct_annotations <- as.character(cell_type_annotations_Xpercent[,colnames(cell_type_annotations_Xpercent)%in%levels[i]]) #vector. 5802 values. Cell types. characters.
@@ -162,28 +160,32 @@ for(i in 1:6){
   #2a. Build a Signature Matrix (music)
   signature_matrix_music <- build_model(variable_singlecelldata_Xpercent, ct_annotations, "music", bulk_gene_expression = bulk, batch_ids = batch_ids)
   
-  #2b. Build a Sign Matrix (cibersort)
-  #set_cibersortx_credentials('sebastien.renaut.1@ulaval.ca','d184d0ae37a164c35f463438cf6e1daa')
-  #signature_matrix_cibersortx <- build_model(sc_data, ct_annotations, "cibersortx", bulk_gene_expression = bulk)
-  #signature_matrix_cibersortx = cbind(rownames(signature_matrix_cibersortx),signature_matrix_cibersortx)
-  #colnames(signature_matrix_cibersortx)[1] = 'gene'
-  #write.table(signature_matrix_cibersortx,file.path(params$hlca,'cibersortX/signature_matrix_cibersortx2.txt'),sep = '\t',quote = F,row.names = F)
+  if(params$cibersortX) {
+    #2b. Build a Sign Matrix (cibersort)
+    set_cibersortx_credentials('sebastien.renaut.1@ulaval.ca','token')
+    signature_matrix_cibersortx <- build_model(sc_data, ct_annotations, "cibersortx", bulk_gene_expression = bulk)
+    signature_matrix_cibersortx = cbind(rownames(signature_matrix_cibersortx),signature_matrix_cibersortx)
+    colnames(signature_matrix_cibersortx)[1] = 'gene'
+    write.table(signature_matrix_cibersortx,file.path(params$hlca,'cibersortX/signature_matrix_cibersortx2.txt'),sep = '\t',quote = F,row.names = F)
   
+  #Deconvolute with cibersortX
+    deconv_cibersort = as.data.frame(deconvolute(bulk_gene_expression=bulk,
+                          signature=signature_matrix_cibersortx,
+                          method = "cibersortx",
+                          single_cell_object = sc_data,
+                          cell_type_annotations = ct_annotations,
+                          batch_ids = batch_ids))
+  }
+                 
 #{
-  #3. Deconvolute
+  #3. Deconvolute with MUSIC,
   deconvolution_music = as.data.frame(deconvolute(bulk_gene_expression=bulk,
                           signature=signature_matrix_music,
                           method = "music",
                           single_cell_object = sc_data,
                           cell_type_annotations = ct_annotations,
                           batch_ids = batch_ids))
-  
-  #deconv_cibersort = as.data.frame(deconvolute(bulk_gene_expression=bulk,
-   #                       signature=signature_matrix_cibersortx,
-    #                      method = "cibersortx",
-     #                     single_cell_object = sc_data,
-      #                    cell_type_annotations = ct_annotations,
-       #                   batch_ids = batch_ids))
+           
 
   #add attributes to the deconvolution object
   deconvolution_music$tissue = 'Sain'
@@ -200,10 +202,10 @@ for(i in 1:6){
   deconv_music[[i]] = deconvolution_music
   print(paste0('Done i: ',i, ' The time is:',Sys.time()))
   }
-  saveRDS(deconv_music,file.path(params$datapath,'results/deconvolution/deconv_music.RDS'))
+  saveRDS(deconv_music,file.path(params$deconvolution,'results/deconv_music.RDS'))
 
   } else {
-    deconv_music = readRDS(file.path(params$datapath,'results/deconvolution/deconv_music.RDS'))
+    deconv_music = readRDS(file.path(params$deconvolution,'results/deconv_music.RDS'))
 }
 ```
 
@@ -217,7 +219,6 @@ cd ../cibersortX
 ./run.sh variable_singlecelldata_ann_level_5_5percent_cibersortx.txt signature_matrix_ann_level_5_cibersortx.txt bulk_cibersortx.txt ann_level5_fractions.txt FALSE 1>>ciber.log 2>>ciber.err
 ./run.sh variable_singlecelldata_ann_finest_level_5percent_cibersortx.txt signature_matrix_ann_finest_level_cibersortx.txt bulk_cibersortx.txt ann_finest_level_fractions.txt FALSE 1>>ciber.log 2>>ciber.err
 pwd
-
 ```
 
 
@@ -599,36 +600,3 @@ ggplot(data_pivot,aes(x=`Pathology_Tumor_Percentage of Tumor`,y = `Fraction of t
 sessionInfo()
 ```
      
-     
-# sandbox info 
-```{r sandbox,eval = F, message= T}
-
-#
-data = pca_tissue$data
-
-#xy = data.frame(x=c(sample(11:20),sample(1:10)), y = c(sample(11:20),sample(1:10)),z = c(rep('A',10),rep('B',10)),s = rep(1:10,2))
-#plot(xy[,1:2],col = c(rep('red',10),rep('blue',10)))
-
-centroids = rbind(c(mean(data$x[data$Col.=='Sain']),mean(data$y[data$Col.=='Sain'])),
-                 c(mean(data$x[data$Col.=='Tumeur']),mean(data$y[data$Col.=='Tumeur'])))
-                 
-points(t(centroids[1,]),col = 'darkred',pch = 19)
-points(t(centroids[2,]),col = 'darkblue',pch = 19)
-
-xyd = as.matrix(dist(data[,2:3]))
-
-res = NULL
-
-for(i in 1:515){
-  temp =xyd[i,i+515]
-  res = c(res,temp)
-  
-}
-
-dist(centroids)
-mean(res)
-
-
-
-```
-
