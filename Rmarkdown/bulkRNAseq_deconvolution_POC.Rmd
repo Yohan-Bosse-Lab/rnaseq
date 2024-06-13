@@ -1,0 +1,634 @@
+---
+title: "deconvolution of bulk RNAseq from HLCA reference scRNA experiment"
+author: "Sébastien Renaut (sebastien.renaut@criucpq.ulaval.ca)"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    number_sections: F
+params:
+  datapath: 'C:/Users/renseb01/Documents/rnaseq'
+  outputpath: '../..' 
+  hlca: 'C:/Users/renseb01/Documents/scRNA/scRNA/data/HLCA'
+  deconvolution_POC: 'C:/Users/renseb01/Documents/rnaseq/deconvolution_POC'
+  cibersortX: FALSE
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_knit$set(root.dir = params$datapath)
+knitr::opts_chunk$set(echo = F)
+library(Seurat)
+library(omnideconv)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(patchwork)
+library(factoextra)
+library(FactoMineR)
+library(RColorBrewer)
+
+levels = c('ann_level_1','ann_level_2','ann_level_3','ann_level_4','ann_level_5','ann_finest_level')
+```
+
+
+# Download a reference Seurat object 
+* Download `hlca_dataset_587k_cells.rds` reference from [here](https://cellxgene.cziscience.com/collections/6f6d381a-7701-4781-935c-db10d30de293)
+* 587k annotated human lung cells
+* Watch out, it's **BIG** (5GB) !
+```{bash download reference, eval=F}
+curl -o local.rds "https://corpora-data-prod.s3.amazonaws.com/7bcad396-49c3-40d9-80c1-16d74e7b88bd/local.rds?AWSAccessKeyId=ASIATLYQ5N5XTNFZ64PH&Signature=nPRw3OfEs2BAJ53VRTUyWaM%2Bj7g%3D&x-amz-security-token=IQoJb3JpZ2luX2VjEG4aCXVzLXdlc3QtMiJHMEUCIFn3rrqkhDNH8Z%2F2UQl%2Bj8cirrNV5AlvILBUr7dIDmSZAiEAj3yBZjO6L4RlbEZcCKGFCerGRCfirs7l%2B5UY2qE44hYq6wMIdxABGgwyMzE0MjY4NDY1NzUiDBMV7F1OUVQgBqAmmCrIA2HOpq%2BUq0pzc04tuUeOEhcMF42Dh3tHXcnykTan1ggtgbRDN9lZJ3oXheGiI9%2FF%2F2K6LsfCNKZjAEqjYqkyA0I%2FMDJCmfMrA8sXxvgENlKHAC%2FeFN4EZe1fL6AzIeY36%2FEt1tEFfQ%2F%2Fi4FLmlG4x9ep89A2OxmfsEMmdgxwbBnIo7FB2AmXq2di5i3ay43M6wBCHaxZ5XCF4ooPQ%2FjzIWcs9VMsLKwxJnC2S%2BeNhYNg3P8yMlQtkci4d5V2avPxdLRxlXFQOyN6VSZPufsZ583m%2BCw7fd2OXI3aIQFUjApE0YE1FILwIGJUlqnXEOE%2BF9QKTFYLTsesucOhKCpGpaBxfJWmi7BHyKz4JkEHpeQYJ1jAZoDb2i%2F6t6wjkfnlz%2BN2c4yrYIbSFeienxQf5LXnwOphMGxhMYwwaYuz4C7EpTCIykaPdPZ790lc%2FK7tjSLa9QODjWA%2B3PYnKXWemUzcTrPcs5j1qbbbXa2sGqWcTK4zPB%2FQREqB%2Ft9nL4oglzUmH4oc1hVF%2B3QZD%2BKMyhuD96nayo5MJ5eqS%2FjRTpobuuOAKTW5vh%2FjK%2F8iV5c8i3u%2F19TNJjXWf1ui%2Fmp%2F0C6exz3qXRSc8TClq4CpBjqlASQ%2BDVWcaEYGT6diPbaIUxlI%2BX184UsHVcZNq%2FKdjLvsB0H9QvJqR%2Fpw1IKRAEv880iFS7qN73MCF1Kw7xS7SvL6PoDic4fzkRzJ9%2BkC0N2lr4SzhErtTc%2B1GyN3CWwH967HfLXq4vPadzvk08TTNTbJAgJEKe84FKHm%2F8wUKhcZhIR6Ek7PpBvn4THSamHKXzPjtnPTAur9THjrY8A8g3ZjCJjlZQ%3D%3D&Expires=1697224687"
+```
+
+
+#check directory exists, else warning of create them.
+```{r reference, eval = T}
+if (!dir.exists(params$datapath)){ 
+  warning(paste0('Dir: ',params$datapath,' does not exist. Please check')) }
+
+if (!dir.exists(params$hlca)){ 
+  warning(paste0('Dir: ',params$hlca,' does not exist. Please check')) }
+
+if (!dir.exists(params$deconvolution_POC)){ 
+  warning(paste0('Dir: ',params$deconvolution_POC,' does not exist. Please check')) }
+
+if (!dir.exists(file.path(params$deconvolution_POC,'music'))){ 
+  warning(paste0(file.path(params$deconvolution_POC,'music'),' does not exist. I will create it')) 
+  dir.create(file.path(params$deconvolution_POC,'music'))
+  }
+
+if (!dir.exists(file.path(params$deconvolution_POC,'cibersortX'))){ 
+  warning(paste0(file.path(params$deconvolution_POC,'cibersortX'),' does not exist. I will create it')) 
+  dir.create(file.path(params$deconvolution_POC,'cibersortX'))
+  }
+```
+
+
+#Generate the reference matrix for the deconvolution
+```{r reference, eval = T}
+#load HLCA reference
+#reference = readRDS(file.path(params$hlca,"hlca_dataset_587k_cells.rds"))
+#reference@meta.data$cellname = rownames(reference@meta.data)
+#reference@meta.data = as.data.frame(lapply(reference@meta.data, as.character))
+data = GetAssayData(reference,slot = 'count')
+
+#keep top 10% most variable genes as a reference for the deconvolution
+variance_genes = FindVariableFeatures(data)
+cutoff = quantile(variance_genes$vst.mean,seq(0.1,by = 0.1))[9]
+variable_data = data[variance_genes$vst.mean>cutoff,]
+
+#keep all annotations , but only 10% of cells (5800 cells)
+cell_type_annotations = reference@meta.data[,colnames(reference@meta.data) %in% c(levels,'cellname','study')]
+
+for(i in 1:6){
+  cell_type_annotations_Xpercent = cell_type_annotations %>% group_by_at(levels[i]) %>% slice_sample(prop = 0.05) #keep 10% of cells.
+  cell_type_annotations_Xpercent = cell_type_annotations_Xpercent[order(cell_type_annotations_Xpercent$cellname),]
+
+  #keep a subset of cells (10%)
+  variable_singlecelldata_Xpercent = variable_data[,colnames(variable_data) %in% cell_type_annotations_Xpercent$cellname]
+  variable_singlecelldata_Xpercent = variable_singlecelldata_Xpercent[,order(colnames(variable_singlecelldata_Xpercent))]
+
+  #save Single Cell expression matrix + annotation music
+  write.csv(cell_type_annotations_Xpercent,file.path(params$deconvolution_POC,paste0('music/cell_type_annotations_',levels[i],'_Xpercent.csv')))
+  write.csv(variable_singlecelldata_Xpercent,file.path(params$deconvolution_POC,paste0('music/variable_singlecelldata_',levels[i],'_Xpercent.csv')))
+  
+  #cibersortx formatting
+  if(params$cibersortX) {
+    colnames(variable_singlecelldata_Xpercent) = cell_type_annotations_Xpercent[,colnames(cell_type_annotations_Xpercent) %in% levels[i]][[1]]
+    variable_singlecelldata_Xpercent = as.matrix(variable_singlecelldata_Xpercent)
+    variable_singlecelldata_Xpercent = cbind(rownames(variable_singlecelldata_Xpercent),variable_singlecelldata_Xpercent)
+    colnames(variable_singlecelldata_Xpercent)[1] = 'gene'
+    write.table(variable_singlecelldata_Xpercent,file.path(params$deconvolution_POC,paste0('cibersortX/variable_singlecelldata_',levels[i],'_Xpercent_cibersortx.txt')),sep = '\t',quote = F,row.names = F)
+    
+    if(i == 1) {
+      #. get the bulkRNAseq data
+      txi = readRDS(file.path(params$datapath,'lord_kallisto/txi.rds'))
+
+      bulk = as.matrix(txi$abundance[sapply(strsplit(rownames(txi$abundance), ".",fixed = T), "[",1) %in% rownames(variable_singlecelldata_subset),])
+      rownames(bulk) = sapply(strsplit(rownames(bulk), ".",fixed = T), "[",1) #matrix. genes X cells. Floats (Counts). Raw abundance (so TPM)
+      colnames(bulk) = sapply(strsplit(colnames(bulk), ".",fixed = T), "[",5)
+  
+      rmean = rowMeans(bulk)
+      bulk = bulk[rmean>0.001,]
+  
+      #for cibersortX write the bulk, because we need it as input.
+      bulk_cibersort = data.frame(gene = rownames(bulk),bulk)
+      write.table(bulk_cibersort,file.path(params$deconvolution_POC,paste0('cibersortX/bulk_cibersortx.txt')),sep = '\t',quote = F,row.names = F)
+    }
+  }
+  print(paste0('Done i: ',i, ' The time is:',Sys.time()))
+}
+
+  
+```
+
+#Do the bulk RNAseq deconvolution
+```{r real data deconvolution}
+  #1.get clinical data
+  #clinical_bigtable = read.csv(file.path(params$datapath,'data/clinical_bigtable_v2.csv'), check.names = F)
+
+  #3. get bulkRNAseq data
+  txi = readRDS(file.path(params$datapath,'lord_kallisto/txi.rds'))
+
+  deconv_music = list()
+  
+  if(!file.exists(file.path(params$datapath,'results/deconvolution/deconv_music.RDS'))){
+  
+  for(i in 1:6){
+  #2.Reference data
+  cell_type_annotations_Xpercent = read.csv(file.path(params$deconvolution_POC,paste0('music/cell_type_annotations_',levels[i],'_Xpercent.csv')), row.names = 1)
+  variable_singlecelldata_Xpercent = as.matrix(read.csv(file.path(params$deconvolution_POC,paste0('music/variable_singlecelldata_',levels[i],'_Xpercent.csv')),row.names = 1))
+
+  bulk = as.matrix(txi$abundance[sapply(strsplit(rownames(txi$abundance), ".",fixed = T), "[",1) %in% rownames(variable_singlecelldata_Xpercent),])
+ 
+  rownames(bulk) = sapply(strsplit(rownames(bulk), ".",fixed = T), "[",1) #matrix. genes X cells. Floats (Counts). Raw abundance (so TPM)
+  colnames(bulk) = sapply(strsplit(colnames(bulk), ".",fixed = T), "[",5)
+  
+  rmean = rowMeans(bulk)
+  bulk = bulk[rmean>0.001,]
+  
+  #bulk = bulk[rmean>quantile(rmean,seq(0,1,by=0.1))[10],]
+  
+  #for cibersortX write the bulk, because we need it as input.
+  #if(i == 1){
+ #   bulk_cibersort = data.frame(gene = rownames(bulk),bulk)
+ #   write.table(bulk_cibersort,file.path(params$deconvolution_POC,paste0('cibersortX/bulk_cibersortx.txt')),sep = '\t',quote = F,row.names = F)
+ # }
+  
+  #filter genes in reference data
+  sc_data = variable_singlecelldata_Xpercent[rownames(variable_singlecelldata_Xpercent) %in% rownames(bulk),] #matrix. 2800 genes X 5802 cells. Integers (Counts). Raw.
+  ct_annotations <- as.character(cell_type_annotations_Xpercent[,colnames(cell_type_annotations_Xpercent)%in%levels[i]]) #vector. 5802 values. Cell types. characters.
+  batch_ids <- as.character(cell_type_annotations_Xpercent$study) #vector. 5802 values. 11 studies. Characters.
+
+  #2a. Build a Signature Matrix (music)
+  signature_matrix_music <- build_model(variable_singlecelldata_Xpercent, ct_annotations, "music", bulk_gene_expression = bulk, batch_ids = batch_ids)
+  
+  #2b. Build a Sign Matrix (cibersort)
+  #set_cibersortx_credentials('sebastien.renaut.1@ulaval.ca','d184d0ae37a164c35f463438cf6e1daa')
+  #signature_matrix_cibersortx <- build_model(sc_data, ct_annotations, "cibersortx", bulk_gene_expression = bulk)
+  #signature_matrix_cibersortx = cbind(rownames(signature_matrix_cibersortx),signature_matrix_cibersortx)
+  #colnames(signature_matrix_cibersortx)[1] = 'gene'
+  #write.table(signature_matrix_cibersortx,file.path(params$hlca,'cibersortX/signature_matrix_cibersortx2.txt'),sep = '\t',quote = F,row.names = F)
+  
+#{
+  #3. Deconvolute
+  deconvolution_music = as.data.frame(deconvolute(bulk_gene_expression=bulk,
+                          signature=signature_matrix_music,
+                          method = "music",
+                          single_cell_object = sc_data,
+                          cell_type_annotations = ct_annotations,
+                          batch_ids = batch_ids))
+  
+  #deconv_cibersort = as.data.frame(deconvolute(bulk_gene_expression=bulk,
+   #                       signature=signature_matrix_cibersortx,
+    #                      method = "cibersortx",
+     #                     single_cell_object = sc_data,
+      #                    cell_type_annotations = ct_annotations,
+       #                   batch_ids = batch_ids))
+
+  #add attributes to the deconvolution object
+  deconvolution_music$tissue = 'Sain'
+  deconvolution_music$tissue[grep('Tumeur',rownames(deconvolution_music))] = 'Tumeur'
+  deconvolution_music$`Record ID` = sapply(strsplit(rownames(deconvolution_music), "_"), "[",3)
+  
+  #merge clinical data
+  #deconv_music_clinical = merge(deconvolution_music,clinical_bigtable, by = 'Record ID')
+
+  #pivot longer
+  #deconv = deconv_music_clinical %>% pivot_longer(names_to = "celltypes",values_to = 'fraction of total', cols = 2:(ncol(deconvolution_music)-1))
+ 
+  #save for later
+  deconv_music[[i]] = deconvolution_music
+  print(paste0('Done i: ',i, ' The time is:',Sys.time()))
+  }
+  saveRDS(deconv_music,file.path(params$datapath,'results/deconvolution/deconv_music.RDS'))
+
+  } else {
+    deconv_music = readRDS(file.path(params$datapath,'results/deconvolution/deconv_music.RDS'))
+}
+```
+
+```{bash deconvolute using cibersortx}
+cd ../cibersortX
+#sudo rm out/*
+./run.sh variable_singlecelldata_ann_level_1_5percent_cibersortx.txt signature_matrix_ann_level_1_cibersortx.txt bulk_cibersortx.txt ann_level1_fractions.txt FALSE 1>ciber.log 2>ciber.err
+./run.sh variable_singlecelldata_ann_level_2_5percent_cibersortx.txt signature_matrix_ann_level_2_cibersortx.txt bulk_cibersortx.txt ann_level2_fractions.txt FALSE 1>>ciber.log 2>>ciber.err
+./run.sh variable_singlecelldata_ann_level_3_5percent_cibersortx.txt signature_matrix_ann_level_3_cibersortx.txt bulk_cibersortx.txt ann_level3_fractions.txt FALSE 1>>ciber.log 2>>ciber.err
+./run.sh variable_singlecelldata_ann_level_4_5percent_cibersortx.txt signature_matrix_ann_level_4_cibersortx.txt bulk_cibersortx.txt ann_level4_fractions.txt FALSE 1>>ciber.log 2>>ciber.err
+./run.sh variable_singlecelldata_ann_level_5_5percent_cibersortx.txt signature_matrix_ann_level_5_cibersortx.txt bulk_cibersortx.txt ann_level5_fractions.txt FALSE 1>>ciber.log 2>>ciber.err
+./run.sh variable_singlecelldata_ann_finest_level_5percent_cibersortx.txt signature_matrix_ann_finest_level_cibersortx.txt bulk_cibersortx.txt ann_finest_level_fractions.txt FALSE 1>>ciber.log 2>>ciber.err
+pwd
+
+```
+
+
+```{r read cibersortx and lets do some comparisons}
+level1_fractions = read.delim(file.path(params$hlca,'cibersortX/ann_level1_fractions.txt'),check.names = F)
+level2_fractions = read.delim(file.path(params$hlca,'cibersortX/ann_level2_fractions.txt'),check.names = F)
+level3_fractions = read.delim(file.path(params$hlca,'cibersortX/ann_level3_fractions.txt'),check.names = F)
+
+deconv_cibersort = list(level1_fractions,level2_fractions,level3_fractions)
+
+for(i in 1:3){
+deconv_cibersort[[i]] = data.frame(deconv_cibersort[[i]][,1:(ncol(deconv_cibersort[[i]])-3)],
+                              tissue = sapply(strsplit(deconv_cibersort[[i]]$Mixture, "_",fixed = T), "[",4),
+                              `Record ID` = sapply(strsplit(deconv_cibersort[[i]]$Mixture, "_",fixed = T), "[",3),check.names = F)
+}
+
+#cibersortX
+level3_pivot = pivot_longer(deconv_cibersort[[3]],cols=2:25,values_to  = 'cibersortX')
+level3_pivot = level3_pivot[order(level3_pivot$name,level3_pivot$Mixture),]
+
+#music
+deconv_music[[3]]$Mixture = sapply(strsplit(rownames(deconv_music[[3]]), ".",fixed = T), "[",5)
+level3_music = pivot_longer(deconv_music[[3]], cols =c(1:19,21:25))
+level3_music = level3_music[order(level3_music$name,level3_music$Mixture),c(4:6)]
+
+#merging both for comparison
+merged_level3 = data.frame(level3_pivot,music = level3_music$value)
+
+#plot
+corplot = ggplot(data = merged_level3) + 
+  geom_point(aes(x =cibersortX, y =music ,col = tissue)) + 
+  facet_wrap(.~name,scale='free') +
+  theme_bw()
+  
+#save
+#pdf(file.path(params$datapath,paste0('results/deconvolution/Figure_music_cibersort_correlation.pdf')),width = 14,height = 12)
+#corplot
+#dev.off()
+```
+
+
+
+```{r plots}
+
+#a bunch of ANOVAs.
+anova(lm(AT1~tissue,deconv_music_clinical))
+anova(lm(AT2~tissue,deconv_music_clinical))
+anova(lm(Rare~tissue,deconv_music_clinical))
+
+tumor = deconv_music_clinical[deconv_music_clinical$tissue=='Tumeur',]
+anova(lm(Rare~`Pathology_Tumor_Percentage of Tumor`,tumor))
+anova(lm(`B cell lineage`~`Pathology_Tumor_stage clinic`,tumor))
+
+
+#Tumor grade versus cell types proportions
+deconv$Tumor_Grade[is.na(deconv$Tumor_Grade)] = 'unknown'
+
+deconv_filtered = deconv %>%
+    filter(celltypes == 'AT1' | celltypes == 'AT2' | celltypes == 'Rare' | celltypes == 'B cell lineage') 
+
+deconv_filtered$celltypes = factor(deconv_filtered$celltypes, levels = c('AT1','AT2','Rare','B cell lineage'))
+
+celltype_specific_plots = deconv_filtered %>% 
+    filter(Tumor_Grade!= 'unknown') %>%
+    filter(tissue != 'Sain') %>%
+    ggplot(aes(x=tissue,y=`fraction of total`,fill=tissue)) +  
+    geom_boxplot(varwidth=F) + 
+    facet_grid(celltypes~Tumor_Grade, scales = "free_y", space = "free_x",switch = 'y') +
+    scale_fill_manual(values = c('darkorange','lightblue')) +
+    ggtitle('Cell type ~ Tumor Grade')
+
+#
+pdf(file.path(params$datapath,paste0('results/deconvolution/Figure4_normal_tumor_grade.pdf')),width = 9,height = 6)
+celltype_specific_plots
+dev.off()
+```
+
+
+#Ground truth (single cell/Nuclei data) # Tumor - normal lineplots
+```{r lineplots}
+#single cell metadata
+metadata = read.csv("C:/Users/renseb01/Documents/scRNA/scRNA/data/adeno.24samples_metadata.csv",row.names = 1)
+
+#bulk RNAseq deconvolution
+deconv_cibersort[[3]]$tissue = ifelse(deconv_cibersort[[3]]$tissue== 'Sain','Normal','Tumor')
+deconv = deconv_cibersort[[3]] %>% pivot_longer(names_to = "celltypes",values_to = 'Fraction of total', cols = 2:25)
+
+#tumor_normal_transition Single NUclei boxplots
+tumor_normal_transition = deconv %>%
+  filter(celltypes %in% c('AT1','AT2','B cell lineage','Basal','Dendritic cells','Innate lymphoid cell NK','Macrophages','Monocytes','Multiciliated lineage','Rare','T cell lineages')) %>%
+  ggplot(aes(x=tissue,y=`Fraction of total`,fill=tissue)) +  
+  geom_boxplot(varwidth=F) + 
+  ggtitle('Normal -> Tumor transition (RNAseq deconvolution)') + 
+  scale_fill_manual(values = c('darkorange','lightblue')) +
+  facet_grid( . ~celltypes, scales = "free_x", space = "free_x",switch = 'y') 
+
+#just add empty categories for your line plot
+nb_cells_per_sample = as.data.frame(table(metadata$unique),stringsAsFactors = F)
+metadata_complete = metadata[c(1,1,1,1:nrow(metadata)),]
+metadata_complete$predicted.ann_level_3[c(1,2,3)] = c('lymphoid cell NK','lymphoid cell NK','Basal')
+metadata_complete$method[c(1,2,3)] = c('Nucleus','Nucleus','Nucleus')
+metadata_complete$type[c(1,2,3)] = c('Normal','Tumor','Normal')
+
+#summarise data
+data_summarised = metadata_complete %>% 
+  group_by(predicted.ann_level_1,predicted.ann_level_3,method,type, patient,unique) %>%
+  summarise(n = length(predicted.ann_level_3),.groups='keep')
+
+#add fractions
+data_summarised$fraction = 0
+
+for(i in seq_along(nb_cells_per_sample[,1])){
+  data_summarised$fraction[data_summarised$unique == nb_cells_per_sample$Var1[i]] =  data_summarised$n[data_summarised$unique == nb_cells_per_sample$Var1[i]] / nb_cells_per_sample$Freq[i]*100
+}
+
+#clean up 
+data_summarised$predicted.ann_level_3[data_summarised$predicted.ann_level_3=='Lymphatic EC differentiating'] = 'Lymph. EC diff.'
+data_summarised$predicted.ann_level_3[data_summarised$predicted.ann_level_3=='Lymphatic EC mature'] = 'Lymph. EC matu.'
+data_summarised$predicted.ann_level_3[data_summarised$predicted.ann_level_3=='Multiciliated lineage'] = 'Multicil. lineage' 
+data_summarised$predicted.ann_level_3[data_summarised$predicted.ann_level_3=='Innate lymphoid cell NK'] = 'lymphoid cell NK' 
+
+#remove immune-depleted cells
+data_summarised = data_summarised[data_summarised$method!='immune depleted cells',]
+
+data_summarised2 = data_summarised %>% 
+  group_by(predicted.ann_level_1,predicted.ann_level_3,method,patient) %>%
+  summarise(fractions = fraction[type=='Tumor']/fraction[type=='Normal'],.groups='keep')
+
+#clean-up a bit 
+data_summarised2 = data_summarised2[data_summarised2$predicted.ann_level_3 != 'None',]
+
+###summarise for a lineplots
+data_summarised_fraction =  data_summarised %>% 
+  group_by(predicted.ann_level_1,predicted.ann_level_3,method,type) %>%
+  summarise(fraction = mean(fraction),.groups='keep')
+
+#lineplot tumor normal transition
+lineplots = data_summarised_fraction %>% 
+  filter(predicted.ann_level_3 %in% c('AT1','AT2','B cell lineage','Basal','Dendritic cells','lymphoid cell NK','Macrophages','Monocytes','Multicil. lineage','Rare','T cell lineages')) %>% 
+  ggplot(aes(x=type, y=fraction, group=method)) +
+  geom_line(aes(color=method),linewidth = 2) +
+  geom_point(aes(color=method),size = 6) + 
+  facet_grid(.~predicted.ann_level_3, scales = "free_y") +
+  ggtitle('Normal -> Tumor transition (Single Cell)') + 
+  scale_color_manual(values = scales::hue_pal()(3)[c(1,3)]) +
+  ylab("Percentage of total cellls in dataset") +
+  xlab("")
+
+pdf(file.path(params$datapath,paste0('results/deconvolution/Figure3_normal_tumor_celltypetransition.pdf')),width = 20,height = 12)
+(tumor_normal_transition  / lineplots) + plot_annotation(tag_levels = 'A')
+dev.off()
+```
+
+
+```{r PCA n cell types}
+#Principal component analysis
+deconv_cibersort[[3]] = deconv_cibersort[[3]][order(deconv_cibersort[[3]]$tissue,deconv_cibersort[[3]]$`Record ID`),]
+deconv_cibersort[[3]] =  merge(deconv_cibersort[[3]],clinical_bigtable, by = 'Record ID')
+
+deconv_pca = PCA(deconv_cibersort[[3]][,c(3:26)],scale = F, graph = F) #I just dont want the None category
+
+pca_loadings = fviz_pca_var(deconv_pca,
+              col.var = "contrib", # Color by contributions to the PC
+              gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
+              repel = TRUE) + ggtitle('PCA loadings (24 cell types)')
+
+pca_tissue = fviz_pca_biplot(deconv_pca,
+                             select.var= list(contrib = 4),
+            col.ind = deconv_cibersort[[3]]$`Pathology_Tumor_Predominant feature`, # color by groups
+            col.var='black',
+             geom = 'point',
+            # palette = c("#00AFBB",  "#FC4E07"),
+             addEllipses = TRUE, # Concentration ellipses
+             #ellipse.level=0.95,
+           #  ellipse.type = "confidence",
+             legend.title = "Groups",
+             repel = F
+             ) + 
+  ggtitle('PCA (samples ~ tissue)') +
+  theme_bw()
+
+
+###tumor specific PCAs
+deconv_cibersort_sub = deconv_cibersort[[3]][deconv_cibersort[[3]]$tissue == 'Normal',]
+
+deconv_cibersort_clinical = merge(deconv_cibersort_sub,clinical_bigtable, by = 'Record ID')
+
+deconv_pca_tumor = prcomp(deconv_cibersort_sub[,c(2:25)],scale = F)
+
+
+
+
+#Smoking status
+smoking_status = data.frame(period = deconv_cibersort_clinical$`Profil_visit_history_Period of smoking cessation`,status = deconv_cibersort_clinical$`Profil_visit_history_Smoking status`,status_period = deconv_cibersort_clinical$`Profil_visit_history_Smoking status`)
+
+for(i in 1:nrow(smoking_status)){
+  
+  if(smoking_status$status[i] == 'Former smoker'){
+    smoking_status$status_period[i] = paste0(smoking_status$status[i],'_',smoking_status$period[i])
+    
+  }
+
+}
+
+
+#Vital status
+pca_vital = fviz_pca_ind(deconv_pca,
+             #col.ind = deconv_cibersort_clinical$`Profil_visit_history_Vital status`, # color by groups
+             #col.ind = smoking_status$status_period,
+             col.ind = deconv_cibersort[[3]]$`Follow-up_PFS (2022)`,
+             geom = 'point',
+             gradient.cols = c("darkblue", "yellow"),
+            # palette = c(RColorBrewer::brewer.pal(n = 9, name = "Set1"),'black'),
+            #   addEllipses = TRUE, # Concentration ellipses
+             #  ellipse.type = "confidence",
+             #  legend.title = "Vital status",
+             #repel = TRUE
+)+ ggtitle('vital status')
+
+#EGFR status
+pca_egfr = fviz_pca_ind(deconv_pca_tumor,
+            col.ind = deconv_cibersort_clinical$`TMA_Oncomine_Gene summary (choice=EGFR)`, # color by groups
+             geom = 'point',
+             palette = RColorBrewer::brewer.pal(n = 2, name = "Set1"),
+             addEllipses = TRUE, # Concentration ellipses
+           #  ellipse.type = "confidence",
+             legend.title = "EGFR status",
+             repel = TRUE
+             ) + ggtitle('EGFR status (oncomine)')
+
+#Tumor Grade
+pca_tumorgrade = fviz_pca_ind(deconv_pca_tumor,
+             col.ind = deconv_cibersort_clinical$Pathology_Tumor_Grade, # color by groups
+             geom = 'point',
+             palette = RColorBrewer::brewer.pal(n = 4, name = "Set1"),
+             addEllipses = TRUE, # Concentration ellipses
+             ellipse.type = "confidence",
+            # ellipse.level=0.95,
+               legend.title = "Tumor grade",
+             repel = TRUE
+)+ ggtitle('Tumor grade')
+
+
+pdf(file.path(params$datapath,paste0('results/deconvolution/Figure2_PCAdeconvolution.pdf')),width = 8,height = 8)
+
+#pca_loadings +  pca_tissue + pca_vital + pca_egfr + pca_tumorgrade + plot_annotation(tag_levels = 'A')
+pca_tissue
+dev.off()
+
+```
+
+
+
+```{r more plots, message= T}
+#LEVEL=1
+plots_fractions = list()
+plots_regression = list()
+i=1
+data = deconv_cibersort[[1]]
+#means = colMeans(data[,2:(ncol(data)-2)])
+#means_extra_cols = c(means,1,1,1)
+#heads = head(order(means,decreasing =T),2)+1
+  
+data = merge(data,clinical_bigtable[,colnames(clinical_bigtable) %in% c('Pathology_Tumor_Percentage of Tumor','Record ID')], by = 'Record ID')
+data = data[order(data$tissue,data$Epithelial,data$Immune,decreasing = T),]
+data$samples = rep(1:(nrow(data)/2),2)
+
+data_pivot = data %>% pivot_longer(names_to = "celltypes",values_to = 'Fraction of total', cols = 3:(ncol(data)-3))
+data_pivot$celltypes= factor(data_pivot$celltypes, levels = c('Epithelial','Immune','Endothelial','Stroma'))
+data_pivot = data_pivot[data_pivot$tissue=='Sain',]
+plots_fractions[[1]] = ggplot(data_pivot, aes(fill=celltypes, y=`Fraction of total`, x= samples)) + 
+  geom_bar(position="stack", stat="identity",width = 1) + 
+#  facet_wrap(.~tissue) +
+  scale_fill_manual('Cell Types',values = RColorBrewer::brewer.pal(n = 4, name = "Set1")[c(2,3,1,4)]) + 
+  xlab('515 Normal samples')+ 
+  ggtitle('Cell proportions') +
+  theme_bw(base_size = 18) +
+  theme(axis.text.x = element_blank(),axis.ticks = element_blank())
+
+#regressions
+data_pivot = data_pivot[data_pivot$tissue=='Tumeur',]
+data_pivot = data_pivot[data_pivot$celltypes %in% c('Epithelial', 'Immune'),]
+plots_regression[[1]] = ggplot(data_pivot,aes(x=`Pathology_Tumor_Percentage of Tumor`,y = `Fraction of total`,color = celltypes)) + 
+  geom_point() +
+  geom_smooth(method = "lm", se = T,color = 'gray50') +
+  facet_wrap(.~celltypes,nrow = 2) +
+  scale_color_manual('',values = RColorBrewer::brewer.pal(n = 4, name = "Set1")[c(2,3,1,4)])+
+  xlab('Percentage of tumor') + 
+  theme_bw() +
+  theme(legend.position = 'none')
+
+#EPITHELIAL vs IMMUNE
+i=3
+cell_type = c('Epithelial','Immune')
+
+for(c in seq_along(cell_type)){
+  celltypes_level3 = unique(cell_type_annotations$ann_level_3[cell_type_annotations$ann_level_1 == cell_type[c]])
+
+  data = deconv_cibersort[[i]][,colnames(deconv_cibersort[[i]]) %in% c(celltypes_level3,'tissue','Record ID')]
+ 
+  #order
+  means = colMeans(data[,1:(ncol(data)-2)])
+  means = means[order(means,decreasing = T)]
+  cbind(round(c(means)*100,2),names(means))
+  
+  data = merge(data,clinical_bigtable[,colnames(clinical_bigtable) %in% c('Pathology_Tumor_Percentage of Tumor','Record ID')], by = 'Record ID')
+  data = data[order(data$tissue,data[,colnames(data) %in% ifelse(c ==1 ,'AT2','B cell lineage')],decreasing = T),]
+  data$samples = rep(1:(nrow(data)/2),2)
+  
+  #regressions
+  data_pivot = data %>% pivot_longer(names_to = "celltypes",values_to = 'Fraction of total', cols = 2:(ncol(data)-3))
+  data_pivot$celltypes= factor(data_pivot$celltypes, levels = names(means))
+  data_pivot = data_pivot[data_pivot$tissue=='Tumor',]
+  if(c ==1) data_pivot = data_pivot[data_pivot$celltypes %in% c('AT1','Rare'),]
+  if(c ==2) data_pivot = data_pivot[data_pivot$celltypes %in% c('B cell lineage', 'Dendritic cells'),]
+  plots_regression[[1+c]] = ggplot(data_pivot,aes(x=`Pathology_Tumor_Percentage of Tumor`,y = `Fraction of total`,color = celltypes)) + 
+    geom_point() +
+    geom_smooth(method = "lm", se = T,color = 'gray50') +
+    facet_wrap(.~celltypes,scales = 'free_y',nrow = 2) +
+    scale_color_manual('',values = RColorBrewer::brewer.pal(n = 7, name = "Paired")[c(ifelse(c == 1,2,1),ifelse(c == 1,5,4))])+
+    xlab('Percentage of tumor') + 
+    theme_bw() +
+    theme(legend.position = 'none')
+  
+  #re-divide by total of epi or immune
+  rowsums = rowSums(data[,c(2:(ncol(data)-3))])
+  data[,c(2:(ncol(data)-3))] = data[,c(2:(ncol(data)-3))] / rowsums
+
+  data_pivot = data %>% pivot_longer(names_to = "celltypes",values_to = 'Fraction of total', cols = 2:(ncol(data)-3))
+  data_pivot$celltypes= factor(data_pivot$celltypes, levels = names(means))
+   data_pivot = data_pivot[data_pivot$tissue=='Sain',]
+  plots_fractions[[1+c]] = ggplot(data_pivot, aes(fill=celltypes, y=`Fraction of total`, x= samples)) + 
+    geom_bar(position="stack", stat="identity",width = 1) + 
+  #  facet_wrap(.~tissue) +
+    scale_fill_manual('Cell Types',values = brewer.pal(n =7, name = ifelse(c==1,"Dark2",'Set3'))   ) + 
+    ggtitle(ifelse(c==1,'Epithelial cells','Immune cells')) +
+    theme_bw(base_size = 18) +
+    xlab(ifelse(c==1,'515 Normal samples','515 Normal samples')) + 
+    ylab(paste0('Fraction of ',cell_type[c],' Cells')) + 
+    theme(axis.text.x = element_blank(),axis.ticks = element_blank())
+  }
+  
+
+
+#save plots  
+#pdf(file.path(params$datapath,paste0('results/deconvolution/Figure1_deconvolution_cibersort.pdf')),width = 14,height = 10)
+#(((plots_fractions[[1]] | plots_regression[[1]]) + plot_layout(widths = c(10,2))) / 
+##((plots_fractions[[2]] | plots_regression[[2]]) + plot_layout(widths = c(10,2))) / 
+#((plots_fractions[[3]] | plots_regression[[3]]) + plot_layout(widths = c(10,2)))) + 
+#  plot_annotation(tag_levels = 'A')
+#dev.off()
+  
+
+
+```
+      
+# predominant feature  
+```{r session, message= T}
+###session
+i=1
+data = deconv_list_all_celltypes[[i]]
+data = merge(data,clinical_bigtable[,colnames(clinical_bigtable) %in% c('Pathology_Tumor_Percentage of Tumor','Record ID')], by = 'Record ID')
+
+data = data[data$tissue== 'Tumeur',]
+
+data_pivot = data %>% pivot_longer(names_to = "celltypes",values_to = 'Fraction of total', cols = 2:(ncol(data)-2))
+
+ggplot(data_pivot,aes(x=`Pathology_Tumor_Percentage of Tumor`,y = `Fraction of total`,color = celltypes)) + 
+  geom_point() +
+  geom_smooth(method = "lm", se = T) +
+  facet_wrap(.~celltypes) +
+  theme_bw()
+```
+    
+ 
+# session info 
+```{r session, message= T}
+###session
+sessionInfo()
+```
+     
+     
+# sandbox info 
+```{r sandbox,eval = F, message= T}
+
+#
+data = pca_tissue$data
+
+#xy = data.frame(x=c(sample(11:20),sample(1:10)), y = c(sample(11:20),sample(1:10)),z = c(rep('A',10),rep('B',10)),s = rep(1:10,2))
+#plot(xy[,1:2],col = c(rep('red',10),rep('blue',10)))
+
+centroids = rbind(c(mean(data$x[data$Col.=='Sain']),mean(data$y[data$Col.=='Sain'])),
+                 c(mean(data$x[data$Col.=='Tumeur']),mean(data$y[data$Col.=='Tumeur'])))
+                 
+points(t(centroids[1,]),col = 'darkred',pch = 19)
+points(t(centroids[2,]),col = 'darkblue',pch = 19)
+
+xyd = as.matrix(dist(data[,2:3]))
+
+res = NULL
+
+for(i in 1:515){
+  temp =xyd[i,i+515]
+  res = c(res,temp)
+  
+}
+
+dist(centroids)
+mean(res)
+
+
+
+```
+
