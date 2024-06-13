@@ -6,7 +6,7 @@ output:
   html_document:
     number_sections: F
 params:
-  datapath: 'C:/Users/renseb01/Documents/rnaseq'
+  datapath: 'C:/Users/renseb01/Documents/rnaseq/lord_kallisto'
   outputpath: '../..' 
   hlca: 'C:/Users/renseb01/Documents/scRNA/scRNA/data/HLCA'
   deconvolution: 'C:/Users/renseb01/Documents/rnaseq/deconvolution'
@@ -106,7 +106,7 @@ for(i in 1:6){
     
     if(i == 1) {
       #. get the bulkRNAseq data
-      txi = readRDS(file.path(params$datapath,'lord_kallisto/txi.rds'))
+      txi = readRDS(file.path(params$datapath,'txi.rds'))
 
       bulk = as.matrix(txi$abundance[sapply(strsplit(rownames(txi$abundance), ".",fixed = T), "[",1) %in% rownames(variable_singlecelldata_subset),])
       rownames(bulk) = sapply(strsplit(rownames(bulk), ".",fixed = T), "[",1) #matrix. genes X cells. Floats (Counts). Raw abundance (so TPM)
@@ -129,10 +129,10 @@ for(i in 1:6){
 #Do the bulk RNAseq deconvolution
 ```{r real data deconvolution}
   #1.get clinical data
-  if(file.exists(file.path(params$datapath,'data/clinical_bigtable_v2.csv'))) clinical_bigtable = read.csv(file.path(params$datapath,'data/clinical_bigtable_v2.csv'), check.names = F)
+  if(file.exists(file.path(params$datapath,'../data/clinical_bigtable_v2.csv'))) clinical_bigtable = read.csv(file.path(params$datapath,'../data/clinical_bigtable_v2.csv'), check.names = F)
 
   #3. get bulkRNAseq data
-  txi = readRDS(file.path(params$datapath,'lord_kallisto/txi.rds'))
+  txi = readRDS(file.path(params$datapath,'txi.rds'))
 
   deconv_music = list()
   
