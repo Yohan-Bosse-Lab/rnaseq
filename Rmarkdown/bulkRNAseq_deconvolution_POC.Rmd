@@ -7,10 +7,10 @@ output:
     number_sections: F
 params:
   datapath: 'C:/Users/renseb01/Documents/rnaseq/lord_kallisto'
-  outputpath: '../..' 
   hlca: 'C:/Users/renseb01/Documents/scRNA/scRNA/data/HLCA'
   deconvolution: 'C:/Users/renseb01/Documents/rnaseq/deconvolution'
   cibersortX: FALSE
+  load_original_reference: FALSE
 ---
 
 
@@ -70,6 +70,8 @@ if (!dir.exists(file.path(params$deconvolution,'results'))){
 
 #Generate the reference matrix for the deconvolution
 ```{r reference, eval = T}
+
+if(params$load_original_reference){
 #load HLCA reference
 reference = readRDS(file.path(params$hlca,"hlca_dataset_587k_cells.rds"))
 reference@meta.data$cellname = rownames(reference@meta.data)
@@ -81,9 +83,18 @@ variance_genes = FindVariableFeatures(data)
 cutoff = quantile(variance_genes$vst.mean,seq(0.1,by = 0.1))[9]
 variable_data = data[variance_genes$vst.mean>cutoff,]
 
-#keep all annotations , but only 10% of cells (5800 cells)
+#keep all annotations, but only 10% of cells (5800 cells)
 cell_type_annotations = reference@meta.data[,colnames(reference@meta.data) %in% c(levels,'cellname','study')]
 
+saveRDS(variable_data,file.path(params$hlca,"variable_data.rds"))
+write.csv(cell_type_annotations,file.path(params$hlca,"cell_type_annotations.csv"))
+} else {
+  variable_data = readRDS(file.path(params$hlca,"variable_data.rds"))
+  cell_type_annotations = read.csv(file.path(params$hlca,"cell_type_annotations.csv"),row.names = 1)
+}
+
+
+#
 for(i in 1:6){
   cell_type_annotations_Xpercent = cell_type_annotations %>% group_by_at(levels[i]) %>% slice_sample(prop = 0.05) #keep 10% of cells.
   cell_type_annotations_Xpercent = cell_type_annotations_Xpercent[order(cell_type_annotations_Xpercent$cellname),]
@@ -120,7 +131,7 @@ for(i in 1:6){
       write.table(bulk_cibersort,file.path(params$deconvolution,paste0('cibersortX/bulk_cibersortx.txt')),sep = '\t',quote = F,row.names = F)
     }
   }
-  print(paste0('Done i: ',i, ' The time is:',Sys.time()))
+  print(paste0('Done i: ',i, ', The time is: ',Sys.time()))
 }
 
   
