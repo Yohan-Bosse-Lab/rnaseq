@@ -70,7 +70,6 @@ if (!dir.exists(file.path(params$deconvolution,'results'))){
 
 #Generate the reference matrix for the deconvolution
 ```{r reference, eval = T}
-
 if(params$load_original_reference){
 #load HLCA reference
 reference = readRDS(file.path(params$hlca,"hlca_dataset_587k_cells.rds"))
@@ -143,8 +142,8 @@ for(i in 1:6){
   if(file.exists(file.path(params$datapath,'../data/clinical_bigtable_v2.csv'))) clinical_bigtable = read.csv(file.path(params$datapath,'../data/clinical_bigtable_v2.csv'), check.names = F)
 
   #3. get bulkRNAseq data
-  txi = readRDS(file.path(params$datapath,'txi.rds'))
-
+  bulkRNAseq = as.matrix(read.csv(file.path(params$datapath,'bulkRNAseq.csv'), row.names = 1))
+  
   deconv_music = list()
   
   if(!file.exists(file.path(params$deconvolution,'results/deconv_music.RDS'))){
@@ -154,15 +153,10 @@ for(i in 1:6){
   cell_type_annotations_Xpercent = read.csv(file.path(params$deconvolution,paste0('music/cell_type_annotations_',levels[i],'_Xpercent.csv')), row.names = 1)
   variable_singlecelldata_Xpercent = as.matrix(read.csv(file.path(params$deconvolution,paste0('music/variable_singlecelldata_',levels[i],'_Xpercent.csv')),row.names = 1))
 
-  bulk = as.matrix(txi$abundance[sapply(strsplit(rownames(txi$abundance), ".",fixed = T), "[",1) %in% rownames(variable_singlecelldata_Xpercent),])
- 
-  rownames(bulk) = sapply(strsplit(rownames(bulk), ".",fixed = T), "[",1) #matrix. genes X cells. Floats (Counts). Raw abundance (so TPM)
-  colnames(bulk) = sapply(strsplit(colnames(bulk), ".",fixed = T), "[",5)
-  
+  bulk = bulkRNAseq[rownames(bulkRNAseq) %in% rownames(variable_singlecelldata_Xpercent),]
   rmean = rowMeans(bulk)
   bulk = bulk[rmean>0.001,]
   
-
   #filter genes in reference data
   sc_data = variable_singlecelldata_Xpercent[rownames(variable_singlecelldata_Xpercent) %in% rownames(bulk),] #matrix. 2800 genes X 5802 cells. Integers (Counts). Raw.
   ct_annotations <- as.character(cell_type_annotations_Xpercent[,colnames(cell_type_annotations_Xpercent)%in%levels[i]]) #vector. 5802 values. Cell types. characters.
@@ -187,7 +181,7 @@ for(i in 1:6){
                           cell_type_annotations = ct_annotations,
                           batch_ids = batch_ids))
   }
-                 
+  
 #{
   #3. Deconvolute with MUSIC,
   deconvolution_music = as.data.frame(deconvolute(bulk_gene_expression=bulk,
